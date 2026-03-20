@@ -4,11 +4,49 @@ AI-agnostic Skills x MCP x CLI — a single Rust binary that turns skills into M
 
 [Crates.io](https://crates.io/crates/sxmc) | [docs.rs](https://docs.rs/sxmc/latest/sxmc/)
 
+## What is sxmc?
+
+[MCP (Model Context Protocol)](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external tools and data sources. Today, if you have skills (structured AI instructions), MCP servers, and APIs, each one requires its own adapter, its own client setup, and its own CLI wrapper. There is no single tool that bridges all three.
+
+**sxmc** solves this. One Rust binary that:
+- Turns skill directories into MCP servers (stdio or remote HTTP)
+- Makes any MCP server usable from the command line
+- Auto-generates CLI commands from OpenAPI and GraphQL specs
+- Scans skills and MCP servers for security threats
+
 ```
 Skills  -->  MCP Server    (serve skills to any MCP client)
 MCP Server  -->  CLI       (turn any MCP server into CLI commands)
 Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
 ```
+
+## Table of Contents
+
+- [What is sxmc?](#what-is-sxmc)
+- [Prerequisites](#prerequisites)
+- [Install](#install)
+- [Quick Start](#quick-start)
+  - [Serve skills as an MCP server](#serve-skills-as-an-mcp-server)
+  - [Run a skill directly](#run-a-skill-directly)
+  - [Any MCP server as CLI](#any-mcp-server-as-cli)
+  - [Any API as CLI](#any-api-as-cli)
+  - [Security scanning](#security-scanning)
+  - [Bake and reuse connections](#bake-and-reuse-connections)
+  - [Generate skills from APIs](#generate-skills-from-apis)
+- [Skills](#skills)
+- [Security Scanning](#security-scanning-1)
+- [Architecture](#architecture)
+- [Client Compatibility](#client-compatibility)
+- [CLI Reference](#cli-reference)
+- [Development](#development)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
+
+## Prerequisites
+
+- **Rust toolchain** (stable) — install via [rustup.rs](https://rustup.rs) (required for `cargo install`)
+- **Node.js** (optional) — only needed if using the [npm wrapper](packaging/npm)
+- No runtime dependencies — sxmc compiles to a single static binary
 
 ## Install
 
@@ -76,6 +114,21 @@ sxmc skills list
 sxmc skills run pr-review 42
 ```
 
+Example output of `sxmc skills list`:
+
+```
+simple-skill
+  A simple test skill
+
+skill-with-references
+  A skill with reference documents
+  Resources: style-guide.md
+
+skill-with-scripts
+  A skill with executable scripts
+  Tools: hello.sh
+```
+
 When served over MCP, each skill is exposed in a hybrid form:
 - the skill body as an MCP prompt
 - `scripts/` as MCP tools
@@ -137,6 +190,19 @@ sxmc scan                                     # scan all skills
 sxmc scan --skill my-skill                    # scan one skill
 sxmc scan --severity critical                 # filter by severity
 sxmc scan --json                              # JSON output
+```
+
+Example output:
+
+```
+[SCAN] skill:malicious-skill — 7 issue(s) found
+  [CRITICAL] SL-INJ-001 (Prompt injection detected): Line contains prompt injection pattern
+  [CRITICAL] SL-SEC-001 (Potential secret exposed): Line may contain a hardcoded secret
+  [ERROR]    SL-HIDE-001 (Hidden Unicode characters): Found 1 'zero-width space' character(s)
+  [ERROR]    SL-EXEC-001 (Dangerous script operation): Line contains potentially dangerous operation
+  [WARN]     SL-PERM-001 (Wildcard tool permission): Skill requests wildcard tool access '*'
+[PASS] skill:simple-skill — no issues at severity >= info
+[PASS] skill:other-skill — no issues at severity >= info
 ```
 
 ### Bake and reuse connections

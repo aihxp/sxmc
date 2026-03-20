@@ -1,5 +1,7 @@
 # Contributing to sxmc
 
+Please note that this project follows a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to abide by its terms.
+
 ## Getting Started
 
 1. Fork the repo and clone it

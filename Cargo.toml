@@ -2,7 +2,7 @@
 name = "sxmc"
 version = "0.1.1"
 edition = "2021"
-description = "AI-agnostic Skills × MCP × CLI pipeline"
+description = "Turn skills into MCP servers, MCP servers into CLI commands, and any OpenAPI/GraphQL API into a CLI — one Rust binary"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/aihxp/sxmc"
