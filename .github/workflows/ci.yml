@@ -46,6 +46,27 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+  smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build debug binary
+        run: cargo build --locked
+
+      - name: Run cross-client smoke script
+        run: bash scripts/smoke_test_clients.sh target/debug/sxmc tests/fixtures
+
+      - name: Check npm wrapper files
+        run: |
+          node --check packaging/npm/bin/sxmc.js
+          SXMC_NPM_SKIP_DOWNLOAD=1 node packaging/npm/scripts/install.mjs
+
   package:
     runs-on: ubuntu-latest
 

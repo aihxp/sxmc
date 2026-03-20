@@ -1,0 +1,36 @@
+{
+  "name": "@aihxp/sxmc",
+  "version": "0.1.1",
+  "description": "Thin npm wrapper for the sxmc Rust CLI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aihxp/sxmc.git"
+  },
+  "homepage": "https://github.com/aihxp/sxmc",
+  "bugs": {
+    "url": "https://github.com/aihxp/sxmc/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "sxmc": "./bin/sxmc.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node ./scripts/install.mjs"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "mcp",
+    "openapi",
+    "graphql",
+    "skills"
+  ]
+}

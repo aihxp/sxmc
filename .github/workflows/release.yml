@@ -54,8 +54,9 @@ jobs:
           mkdir -p "$PKG_DIR"
           cp "target/${{ matrix.target }}/release/sxmc" "$PKG_DIR/"
           cp README.md LICENSE "$PKG_DIR/"
-          cp docs/CLIENTS.md docs/RELEASING.md "$PKG_DIR/"
+          cp docs/CLIENTS.md docs/RELEASING.md docs/DISTRIBUTION.md docs/SMOKE_TESTS.md "$PKG_DIR/"
           tar -czf "${PKG_DIR}.tar.gz" "$PKG_DIR"
+          shasum -a 256 "${PKG_DIR}.tar.gz" > "${PKG_DIR}.tar.gz.sha256"
 
       - name: Package archive (Windows)
         if: runner.os == 'Windows'
@@ -66,8 +67,9 @@ jobs:
           New-Item -ItemType Directory -Path $pkgDir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/sxmc.exe" "$pkgDir/"
           Copy-Item README.md, LICENSE "$pkgDir/"
-          Copy-Item docs/CLIENTS.md, docs/RELEASING.md "$pkgDir/"
+          Copy-Item docs/CLIENTS.md, docs/RELEASING.md, docs/DISTRIBUTION.md, docs/SMOKE_TESTS.md "$pkgDir/"
           Compress-Archive -Path $pkgDir -DestinationPath "$pkgDir.zip"
+          (Get-FileHash "$pkgDir.zip" -Algorithm SHA256).Hash.ToLower() | Out-File -Encoding ascii "$pkgDir.zip.sha256"
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -75,3 +77,4 @@ jobs:
         with:
           files: |
             sxmc-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+            sxmc-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive_ext }}.sha256

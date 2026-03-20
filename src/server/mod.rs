@@ -9,12 +9,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Request, State},
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
+    extract::Request,
+    http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
+    Json, Router,
 };
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, tower::StreamableHttpService, StreamableHttpServerConfig,
@@ -31,6 +31,18 @@ use self::handler::SkillsServer;
 pub struct HttpAuth {
     header_name: HeaderName,
     header_value: HeaderValue,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HttpAuthConfig {
+    rules: Vec<HttpAuth>,
+    schemes: Vec<&'static str>,
+}
+
+#[derive(Clone, Debug)]
+struct HttpServerInfo {
+    auth_enabled: bool,
+    auth_schemes: Vec<&'static str>,
 }
 
 impl HttpAuth {
@@ -58,19 +70,73 @@ impl HttpAuth {
     }
 }
 
-async fn require_auth(
-    State(auth): State<Arc<Vec<HttpAuth>>>,
-    request: Request,
-    next: Next,
-) -> Response {
+impl HttpAuthConfig {
+    fn new(required_headers: &[(String, String)], bearer_token: Option<&str>) -> Result<Self> {
+        let mut rules = required_headers
+            .iter()
+            .map(|(name, value)| HttpAuth::try_from_pair(name, value))
+            .collect::<Result<Vec<_>>>()?;
+        let mut schemes = Vec::new();
+
+        if !required_headers.is_empty() {
+            schemes.push("headers");
+        }
+
+        if let Some(token) = bearer_token {
+            rules.push(HttpAuth::try_from_pair(
+                "Authorization",
+                &format!("Bearer {token}"),
+            )?);
+            schemes.push("bearer");
+        }
+
+        Ok(Self { rules, schemes })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    fn bearer_enabled(&self) -> bool {
+        self.schemes.contains(&"bearer")
+    }
+}
+
+async fn require_auth(auth: Arc<HttpAuthConfig>, request: Request, next: Next) -> Response {
     if auth
+        .rules
         .iter()
         .all(|required| required.matches(request.headers()))
     {
         next.run(request).await
     } else {
-        (StatusCode::UNAUTHORIZED, "Unauthorized\n").into_response()
+        let mut response = (StatusCode::UNAUTHORIZED, "Unauthorized\n").into_response();
+        if auth.bearer_enabled() {
+            response.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                HeaderValue::from_static("Bearer realm=\"sxmc\""),
+            );
+        }
+        response
     }
+}
+
+async fn root_handler() -> &'static str {
+    "sxmc streamable HTTP MCP server\nEndpoint: /mcp\nHealth: /healthz\n"
+}
+
+async fn health_handler(info: Arc<HttpServerInfo>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "name": "sxmc",
+        "version": env!("CARGO_PKG_VERSION"),
+        "status": "ok",
+        "transport": "streamable-http",
+        "endpoint": "/mcp",
+        "auth": {
+            "enabled": info.auth_enabled,
+            "schemes": info.auth_schemes,
+        }
+    }))
 }
 
 /// Build a SkillsServer from skill search paths.
@@ -137,20 +203,31 @@ fn build_streamable_http_service(
 fn build_http_router(
     paths: Arc<Vec<PathBuf>>,
     cancellation_token: CancellationToken,
-    auth: Arc<Vec<HttpAuth>>,
+    auth: Arc<HttpAuthConfig>,
 ) -> Router {
     let service = build_streamable_http_service(paths, cancellation_token);
+    let info = Arc::new(HttpServerInfo {
+        auth_enabled: !auth.is_empty(),
+        auth_schemes: auth.schemes.clone(),
+    });
     let mcp_router = Router::new().nest_service("/mcp", service);
     let mcp_router = if auth.is_empty() {
         mcp_router
     } else {
-        mcp_router.layer(middleware::from_fn_with_state(auth, require_auth))
+        mcp_router.layer(middleware::from_fn({
+            let auth = auth.clone();
+            move |request, next| require_auth(auth.clone(), request, next)
+        }))
     };
 
     Router::new()
+        .route("/", get(root_handler))
         .route(
-            "/",
-            get(|| async { "sxmc streamable HTTP MCP server\nEndpoint: /mcp\n" }),
+            "/healthz",
+            get({
+                let info = info.clone();
+                move || health_handler(info.clone())
+            }),
         )
         .merge(mcp_router)
 }
@@ -164,6 +241,7 @@ pub async fn serve_http(
     host: &str,
     port: u16,
     required_headers: &[(String, String)],
+    bearer_token: Option<&str>,
 ) -> Result<()> {
     let bind_addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&bind_addr)
@@ -173,10 +251,7 @@ pub async fn serve_http(
         .local_addr()
         .map_err(|e| crate::error::SxmcError::Other(format!("Failed to read local addr: {e}")))?;
     let cancellation_token = CancellationToken::new();
-    let auth = required_headers
-        .iter()
-        .map(|(name, value)| HttpAuth::try_from_pair(name, value))
-        .collect::<Result<Vec<_>>>()?;
+    let auth = HttpAuthConfig::new(required_headers, bearer_token)?;
     let router = build_http_router(
         Arc::new(paths.to_vec()),
         cancellation_token.clone(),
@@ -192,6 +267,9 @@ pub async fn serve_http(
             "[sxmc] Remote MCP auth enabled with {} required header(s)",
             required_headers.len()
         );
+    }
+    if bearer_token.is_some() {
+        eprintln!("[sxmc] Bearer token auth enabled for remote MCP access");
     }
 
     let shutdown = cancellation_token.clone();
@@ -213,7 +291,7 @@ pub async fn serve_http(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{HeaderValue, StatusCode};
+    use axum::http::{header, HeaderValue, StatusCode};
 
     #[tokio::test]
     async fn test_streamable_http_server_serves_mcp_endpoint() {
@@ -223,7 +301,7 @@ mod tests {
         let router = build_http_router(
             Arc::new(vec![PathBuf::from("tests/fixtures")]),
             cancel.child_token(),
-            Arc::new(Vec::new()),
+            Arc::new(HttpAuthConfig::default()),
         );
 
         let handle = tokio::spawn({
@@ -266,11 +344,7 @@ mod tests {
         let router = build_http_router(
             Arc::new(vec![PathBuf::from("tests/fixtures")]),
             cancel.child_token(),
-            Arc::new(vec![HttpAuth::try_from_pair(
-                "Authorization",
-                "Bearer test-token",
-            )
-            .unwrap()]),
+            Arc::new(HttpAuthConfig::new(&[], Some("test-token")).unwrap()),
         );
 
         let handle = tokio::spawn({
@@ -294,6 +368,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            unauthorized
+                .headers()
+                .get(header::WWW_AUTHENTICATE)
+                .and_then(|v| v.to_str().ok()),
+            Some("Bearer realm=\"sxmc\"")
+        );
 
         let authorized = client
             .post(format!("http://{addr}/mcp"))
@@ -305,6 +386,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(authorized.status(), StatusCode::OK);
+
+        cancel.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint_reports_auth_modes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        let router = build_http_router(
+            Arc::new(vec![PathBuf::from("tests/fixtures")]),
+            cancel.child_token(),
+            Arc::new(
+                HttpAuthConfig::new(
+                    &[("X-API-Key".to_string(), "abc123".to_string())],
+                    Some("test-token"),
+                )
+                .unwrap(),
+            ),
+        );
+
+        let handle = tokio::spawn({
+            let cancel = cancel.clone();
+            async move {
+                let _ = axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        cancel.cancelled_owned().await;
+                    })
+                    .await;
+            }
+        });
+
+        let response = reqwest::get(format!("http://{addr}/healthz"))
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap();
+
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["endpoint"], "/mcp");
+        assert_eq!(response["auth"]["enabled"], true);
+        assert_eq!(
+            response["auth"]["schemes"],
+            serde_json::json!(["headers", "bearer"])
+        );
 
         cancel.cancel();
         handle.await.unwrap();

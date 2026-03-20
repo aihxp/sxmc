@@ -20,6 +20,7 @@ cargo fmt
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo package
+bash scripts/smoke_test_clients.sh target/debug/sxmc tests/fixtures
 ```
 
 4. Smoke-test both MCP entrypoints:
@@ -29,6 +30,8 @@ sxmc serve --paths tests/fixtures
 sxmc serve --transport http --host 127.0.0.1 --port 8000 --paths tests/fixtures
 sxmc serve --transport http --host 127.0.0.1 --port 8000 \
   --require-header "Authorization: test-token" --paths tests/fixtures
+sxmc serve --transport http --host 127.0.0.1 --port 8000 \
+  --bearer-token test-token --paths tests/fixtures
 ```
 
 ## Create a Release Tag
@@ -43,6 +46,8 @@ The GitHub Actions release workflow will build archives for:
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 - `x86_64-pc-windows-msvc`
+
+The workflow also publishes matching `.sha256` files for each archive.
 
 ## Publish to crates.io
 
@@ -59,6 +64,14 @@ After publishing, users can install with:
 cargo install sxmc
 ```
 
+## Optional Distribution Channels
+
+Additional packaging scaffolds live in:
+
+- [`packaging/npm`](../packaging/npm)
+- [`packaging/homebrew/sxmc.rb`](../packaging/homebrew/sxmc.rb)
+- [`docs/DISTRIBUTION.md`](DISTRIBUTION.md)
+
 Until then, users can install from Git:
 
 ```bash
@@ -71,6 +84,8 @@ If possible, avoid breaking these without a version bump and README update:
 - `sxmc serve`
 - remote MCP endpoint shape: `sxmc serve --transport http ...` at `/mcp`
 - remote MCP auth flag: `--require-header K:V`
+- remote MCP bearer auth flag: `--bearer-token TOKEN`
+- remote MCP health endpoint: `/healthz`
 - hybrid tools:
   - `get_available_skills`
   - `get_skill_details`

@@ -3,6 +3,14 @@
 `sxmc` is designed first for stdio-based MCP clients, but it can also run as a
 remote streamable HTTP MCP server at `/mcp`.
 
+For remote deployments, prefer:
+
+```bash
+sxmc serve --transport http --host 0.0.0.0 --port 8000 \
+  --bearer-token env:SXMC_MCP_TOKEN \
+  --paths /absolute/path/to/skills
+```
+
 ## Support Matrix
 
 | Client | Local stdio MCP | Remote HTTP MCP | Status with `sxmc` |
@@ -27,7 +35,18 @@ Codex can also connect to a remote HTTP MCP server:
 codex mcp add sxmc-remote --url http://127.0.0.1:8000/mcp
 ```
 
-If the remote server is protected, register the matching auth header too.
+Codex quick smoke check:
+
+```bash
+codex mcp list
+```
+
+The equivalent persistent config shape is:
+
+```toml
+[mcp_servers.sxmc]
+url = "http://127.0.0.1:8000/mcp"
+```
 
 To confirm it is registered:
 
@@ -66,8 +85,21 @@ retrieval tools should appear in the MCP tools UI.
 
 If you host `sxmc` remotely, use Cursor's HTTP MCP configuration and point it at
 `http://HOST:PORT/mcp`.
-If you protect the endpoint with `--require-header`, configure the same header
-in Cursor's MCP server definition.
+
+Remote example:
+
+```json
+{
+  "mcpServers": {
+    "sxmc": {
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+If you protect the endpoint with `--bearer-token` or `--require-header`, add the
+matching auth configuration in Cursor's MCP server definition.
 
 ## Gemini CLI
 
@@ -96,8 +128,16 @@ Then launch Gemini CLI and run:
 Gemini CLI can also package `sxmc` as part of a local extension if you want to
 bundle a skills directory and a `GEMINI.md` context file together.
 
+Gemini CLI can also register servers directly from the command line:
+
+```bash
+gemini mcp add sxmc sxmc serve --paths /absolute/path/to/skills
+gemini mcp add sxmc-remote http://127.0.0.1:8000/mcp --transport http
+```
+
 For a remote server, configure the MCP server URL as `http://HOST:PORT/mcp`.
-If you use `--require-header`, include the same header in the remote MCP config.
+If you use `--bearer-token` or `--require-header`, include the same auth
+configuration in the remote MCP config.
 
 ## Claude Code and Similar Local MCP Clients
 
@@ -124,8 +164,15 @@ For anything beyond localhost, prefer:
 
 ```bash
 sxmc serve --transport http --host 0.0.0.0 --port 8000 \
-  --require-header "Authorization: env:SXMC_MCP_TOKEN" \
+  --bearer-token env:SXMC_MCP_TOKEN \
   --paths /absolute/path/to/skills
+```
+
+Health and smoke checks:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+sxmc http http://127.0.0.1:8000/mcp --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" --list
 ```
 
 Because `sxmc` exposes a hybrid surface, these clients can use:
@@ -145,3 +192,10 @@ For broadest compatibility, prefer the hybrid pattern already implemented by
 
 Those generic tools are the most portable across clients that are better at
 tool calling than prompt/resource handling.
+
+## Release and Distribution
+
+Additional release-channel notes are in:
+
+- [`docs/SMOKE_TESTS.md`](SMOKE_TESTS.md)
+- [`docs/DISTRIBUTION.md`](DISTRIBUTION.md)

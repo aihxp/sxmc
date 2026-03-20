@@ -388,3 +388,82 @@ fn test_http_lists_hybrid_skill_tools_with_required_header() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn test_http_lists_hybrid_skill_tools_with_bearer_token() {
+    let port = pick_unused_port();
+    let mut child = ProcessCommand::new(sxmc_bin_string())
+        .env("SXMC_TEST_BEARER_TOKEN", "integration-bearer-token")
+        .args([
+            "serve",
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--bearer-token",
+            "env:SXMC_TEST_BEARER_TOKEN",
+            "--paths",
+            "tests/fixtures",
+        ])
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(750));
+
+    sxmc()
+        .args([
+            "http",
+            &format!("http://127.0.0.1:{port}/mcp"),
+            "--auth-header",
+            "Authorization: Bearer integration-bearer-token",
+            "--list",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("get_available_skills"))
+        .stdout(predicate::str::contains("get_skill_details"))
+        .stdout(predicate::str::contains("skill_with_scripts__hello"));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[tokio::test]
+async fn test_http_health_endpoint_reports_auth_mode() {
+    let port = pick_unused_port();
+    let mut child = ProcessCommand::new(sxmc_bin_string())
+        .args([
+            "serve",
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--bearer-token",
+            "health-token",
+            "--paths",
+            "tests/fixtures",
+        ])
+        .spawn()
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(750));
+
+    let response: serde_json::Value = reqwest::get(format!("http://127.0.0.1:{port}/healthz"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["status"], "ok");
+    assert_eq!(response["transport"], "streamable-http");
+    assert_eq!(response["auth"]["enabled"], true);
+    assert_eq!(response["auth"]["schemes"], serde_json::json!(["bearer"]));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}

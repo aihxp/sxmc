@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use std::collections::HashMap;
 
-use sxmc::auth::secrets::resolve_header;
+use sxmc::auth::secrets::{resolve_header, resolve_secret};
 use sxmc::bake::config::SourceType;
 use sxmc::bake::{BakeConfig, BakeStore};
 use sxmc::client::{api, graphql, mcp_http, mcp_stdio, openapi};
@@ -43,6 +43,10 @@ enum Commands {
         /// Require HTTP header(s) for remote MCP access (Key:Value)
         #[arg(long = "require-header", value_name = "K:V")]
         require_headers: Vec<String>,
+
+        /// Require a Bearer token for remote MCP access
+        #[arg(long, value_name = "TOKEN")]
+        bearer_token: Option<String>,
     },
 
     /// Manage skills
@@ -372,6 +376,10 @@ fn parse_headers(headers: &[String]) -> Result<Vec<(String, String)>> {
     headers.iter().map(|h| resolve_header(h)).collect()
 }
 
+fn parse_optional_secret(secret: Option<String>) -> Result<Option<String>> {
+    secret.map(|value| resolve_secret(&value)).transpose()
+}
+
 fn parse_source_type(source_type: &str) -> SourceType {
     match source_type {
         "stdio" => SourceType::Stdio,
@@ -400,13 +408,29 @@ async fn main() -> anyhow::Result<()> {
             port,
             host,
             require_headers,
+            bearer_token,
         } => {
             let search_paths = resolve_paths(paths);
             let required_headers = parse_headers(&require_headers)?;
+            let bearer_token = parse_optional_secret(bearer_token)?;
             match transport.as_str() {
-                "stdio" => server::serve_stdio(&search_paths).await?,
+                "stdio" => {
+                    if !required_headers.is_empty() || bearer_token.is_some() {
+                        eprintln!(
+                            "[sxmc] Warning: remote auth flags are ignored for stdio transport"
+                        );
+                    }
+                    server::serve_stdio(&search_paths).await?
+                }
                 "http" | "sse" => {
-                    server::serve_http(&search_paths, &host, port, &required_headers).await?
+                    server::serve_http(
+                        &search_paths,
+                        &host,
+                        port,
+                        &required_headers,
+                        bearer_token.as_deref(),
+                    )
+                    .await?
                 }
                 other => {
                     eprintln!("[sxmc] Unknown transport: {}", other);

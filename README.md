@@ -28,7 +28,8 @@ cargo build --release
 
 Additional setup and client-specific configuration examples are in
 [`docs/CLIENTS.md`](docs/CLIENTS.md). Release and publishing steps are in
-[`docs/RELEASING.md`](docs/RELEASING.md).
+[`docs/RELEASING.md`](docs/RELEASING.md). Distribution-channel notes are in
+[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
 
 ## Quick Start
 
@@ -44,6 +45,11 @@ sxmc serve --transport http --host 127.0.0.1 --port 8000
 # Require auth headers for remote MCP access
 sxmc serve --transport http --host 0.0.0.0 --port 8000 \
   --require-header "Authorization: env:SXMC_MCP_TOKEN"
+
+# Or use Bearer token auth plus a health endpoint
+sxmc serve --transport http --host 0.0.0.0 --port 8000 \
+  --bearer-token env:SXMC_MCP_TOKEN
+curl http://127.0.0.1:8000/healthz
 ```
 
 Add to any MCP client config:
@@ -95,7 +101,8 @@ sxmc stdio "sxmc serve --paths tests/fixtures" get_skill_related_file \
 ```
 
 For hosted `/mcp` endpoints, prefer `--require-header` so remote access is not
-left open by default.
+left open by default. For single-token hosted deployments, `--bearer-token` is
+usually the friendlier option.
 
 ### Any API as CLI
 
@@ -230,7 +237,8 @@ remote streamable HTTP MCP endpoint at `/mcp`.
 
 - Supported now: Codex, Cursor, Gemini CLI, Claude Code-style local MCP clients
 - Supported now for remote MCP consumers too: streamable HTTP MCP at `/mcp`
-- Recommended for hosted remote MCP: `--require-header "Authorization: env:..."`
+- Recommended for hosted remote MCP: `--bearer-token env:SXMC_MCP_TOKEN`
+- Health endpoint for hosted deployments: `/healthz`
 
 See [`docs/CLIENTS.md`](docs/CLIENTS.md) for setup examples.
 
@@ -240,7 +248,7 @@ See [`docs/CLIENTS.md`](docs/CLIENTS.md) for setup examples.
 sxmc [subcommand] [options]
 
 SERVER:
-  serve [--paths ...] [--transport stdio|http|sse] [--host 127.0.0.1] [--port 8000] [--require-header K:V]
+  serve [--paths ...] [--transport stdio|http|sse] [--host 127.0.0.1] [--port 8000] [--require-header K:V] [--bearer-token TOKEN]
 
 SKILLS:
   skills list [--paths ...] [--json]
@@ -283,6 +291,7 @@ cargo build --release
 # Run directly
 cargo run -- skills list --paths tests/fixtures
 cargo run -- scan --paths tests/fixtures
+bash scripts/smoke_test_clients.sh target/debug/sxmc tests/fixtures
 ```
 
 ## Acknowledgements
