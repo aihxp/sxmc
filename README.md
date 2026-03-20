@@ -47,6 +47,12 @@ sxmc skills list
 sxmc skills run pr-review 42
 ```
 
+When served over MCP, each skill is exposed in a hybrid form:
+- the skill body as an MCP prompt
+- `scripts/` as MCP tools
+- `references/` as MCP resources
+- generic retrieval tools for listing skills, reading skill details, and reading files
+
 ### Any MCP server as CLI
 
 ```bash
@@ -57,6 +63,18 @@ sxmc stdio "npx @mcp/github" search-repos query=rust
 # HTTP server
 sxmc http https://mcp.example.com/sse --list
 sxmc http https://mcp.example.com/sse my-tool key=value
+```
+
+That means skills can flow through both stages in one go:
+
+```bash
+# Serve local skills over MCP, then bridge that MCP server back into CLI
+sxmc stdio "sxmc serve --paths tests/fixtures" --list
+sxmc stdio "sxmc serve --paths tests/fixtures" get_available_skills --pretty
+sxmc stdio "sxmc serve --paths tests/fixtures" get_skill_details name=simple-skill --pretty
+sxmc stdio "sxmc serve --paths tests/fixtures" get_skill_related_file \
+  skill_name=skill-with-references \
+  relative_path=references/style-guide.md
 ```
 
 ### Any API as CLI
@@ -217,10 +235,15 @@ BAKE:
   bake remove <name>
 ```
 
+Hybrid skill retrieval tools exposed by `serve`:
+- `get_available_skills`
+- `get_skill_details`
+- `get_skill_related_file`
+
 ## Development
 
 ```bash
-# Run tests (69 total: 55 unit + 14 integration)
+# Run tests (74 total: 57 unit + 17 integration)
 cargo test
 
 # Build

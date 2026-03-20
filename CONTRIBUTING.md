@@ -61,6 +61,17 @@ The client module uses a `CommandDef` abstraction shared across all API types. T
 3. Implement execution that takes a `CommandDef` + args and makes HTTP calls
 4. Wire it into `src/client/api.rs` for auto-detection
 
+### Hybrid Skill Surface
+
+`sxmc serve` exposes skills in two ways at once:
+1. Native MCP primitives:
+   prompts for skill bodies, tools for `scripts/`, resources for `references/`
+2. Generic MCP tools:
+   `get_available_skills`, `get_skill_details`, and `get_skill_related_file`
+
+That hybrid model is what allows `skills -> MCP -> CLI` to work through the existing
+`sxmc stdio` and `sxmc http` bridges without requiring prompt/resource-specific CLI flags.
+
 ## Pull Requests
 
 - Keep PRs focused on a single change

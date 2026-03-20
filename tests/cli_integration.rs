@@ -5,6 +5,12 @@ fn sxmc() -> Command {
     Command::cargo_bin("sxmc").unwrap()
 }
 
+fn sxmc_bin_string() -> String {
+    assert_cmd::cargo::cargo_bin("sxmc")
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[test]
 fn test_version() {
     sxmc()
@@ -193,4 +199,57 @@ fn test_no_subcommand_shows_help() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Usage"));
+}
+
+#[test]
+fn test_stdio_lists_hybrid_skill_tools() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("get_available_skills"))
+        .stdout(predicate::str::contains("get_skill_details"))
+        .stdout(predicate::str::contains("get_skill_related_file"))
+        .stdout(predicate::str::contains("skill_with_scripts__hello"));
+}
+
+#[test]
+fn test_stdio_hybrid_get_skill_details() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args([
+            "stdio",
+            &inner,
+            "get_skill_details",
+            "name=simple-skill",
+            "return_type=both",
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"simple-skill\""))
+        .stdout(predicate::str::contains("\"prompt_name\": \"simple-skill\""))
+        .stdout(predicate::str::contains("Hello $ARGUMENTS, welcome to sxmc!"));
+}
+
+#[test]
+fn test_stdio_hybrid_get_skill_related_file() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args([
+            "stdio",
+            &inner,
+            "get_skill_related_file",
+            "skill_name=skill-with-references",
+            "relative_path=references/style-guide.md",
+            "return_type=content",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Style Guide"))
+        .stdout(predicate::str::contains("Use clear, concise language"));
 }
