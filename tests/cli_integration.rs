@@ -24,6 +24,20 @@ fn pick_unused_port() -> u16 {
         .port()
 }
 
+fn wait_for_http_server(port: u16) {
+    let addr = format!("127.0.0.1:{port}")
+        .parse()
+        .expect("valid socket address");
+    for _ in 0..40 {
+        if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
+            std::thread::sleep(Duration::from_millis(100));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("timed out waiting for HTTP server on port {}", port);
+}
+
 #[test]
 fn test_version() {
     sxmc()
@@ -295,6 +309,47 @@ fn test_stdio_accepts_json_array_command_spec() {
 }
 
 #[test]
+fn test_stdio_lists_prompts_explicitly() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--list-prompts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Prompts"))
+        .stdout(predicate::str::contains("simple-skill"));
+}
+
+#[test]
+fn test_stdio_describe_reports_capabilities_and_counts() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--describe", "--pretty"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"protocol_version\""))
+        .stdout(predicate::str::contains("\"capabilities\""))
+        .stdout(predicate::str::contains("\"tools\": true"))
+        .stdout(predicate::str::contains("\"prompts\": true"))
+        .stdout(predicate::str::contains("\"resources\": true"))
+        .stdout(predicate::str::contains("\"counts\""));
+}
+
+#[test]
+fn test_stdio_describe_tool_shows_schema_summary() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--describe-tool", "get_skill_details"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Tool: get_skill_details"))
+        .stdout(predicate::str::contains("name [required]"))
+        .stdout(predicate::str::contains("Parameters"));
+}
+
+#[test]
 fn test_stdio_hybrid_get_skill_details() {
     let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
 
@@ -455,7 +510,7 @@ fn test_http_lists_hybrid_skill_tools() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     sxmc()
         .args(["http", &format!("http://127.0.0.1:{port}/mcp"), "--list"])
@@ -464,6 +519,41 @@ fn test_http_lists_hybrid_skill_tools() {
         .stdout(predicate::str::contains("get_available_skills"))
         .stdout(predicate::str::contains("get_skill_details"))
         .stdout(predicate::str::contains("skill_with_scripts__hello"));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn test_http_lists_resources_explicitly() {
+    let port = pick_unused_port();
+    let mut child = ProcessCommand::new(sxmc_bin_string())
+        .args([
+            "serve",
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--paths",
+            "tests/fixtures",
+        ])
+        .spawn()
+        .unwrap();
+
+    wait_for_http_server(port);
+
+    sxmc()
+        .args([
+            "http",
+            &format!("http://127.0.0.1:{port}/mcp"),
+            "--list-resources",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Resources"))
+        .stdout(predicate::str::contains("style-guide.md"));
 
     let _ = child.kill();
     let _ = child.wait();
@@ -487,7 +577,7 @@ fn test_http_reads_prompt() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     sxmc()
         .args([
@@ -523,7 +613,7 @@ fn test_http_reads_resource() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     sxmc()
         .args([
@@ -561,7 +651,7 @@ fn test_http_lists_hybrid_skill_tools_with_required_header() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     sxmc()
         .args([
@@ -602,7 +692,7 @@ fn test_http_lists_hybrid_skill_tools_with_bearer_token() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     sxmc()
         .args([
@@ -642,7 +732,7 @@ async fn test_http_health_endpoint_reports_auth_mode() {
         .spawn()
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(750));
+    wait_for_http_server(port);
 
     let response: serde_json::Value = reqwest::get(format!("http://127.0.0.1:{port}/healthz"))
         .await

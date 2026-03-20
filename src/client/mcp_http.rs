@@ -45,10 +45,10 @@ impl HttpClient {
     pub async fn list_tools(&self) -> Result<Vec<Tool>> {
         let result = self
             .service
-            .list_tools(None)
+            .list_all_tools()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_tools failed: {}", e)))?;
-        Ok(result.tools)
+        Ok(result)
     }
 
     pub async fn call_tool(
@@ -71,10 +71,10 @@ impl HttpClient {
     pub async fn list_prompts(&self) -> Result<Vec<Prompt>> {
         let result = self
             .service
-            .list_prompts(None)
+            .list_all_prompts()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_prompts failed: {}", e)))?;
-        Ok(result.prompts)
+        Ok(result)
     }
 
     pub async fn get_prompt(
@@ -96,10 +96,15 @@ impl HttpClient {
     pub async fn list_resources(&self) -> Result<Vec<Resource>> {
         let result = self
             .service
-            .list_resources(None)
+            .list_all_resources()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_resources failed: {}", e)))?;
-        Ok(result.resources)
+        Ok(result)
+    }
+
+    /// Return negotiated MCP server information from the initialization handshake.
+    pub fn server_info(&self) -> Option<ServerInfo> {
+        self.service.peer_info().cloned()
     }
 
     pub async fn read_resource(&self, uri: &str) -> Result<ReadResourceResult> {

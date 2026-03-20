@@ -51,10 +51,10 @@ impl StdioClient {
     pub async fn list_tools(&self) -> Result<Vec<Tool>> {
         let result = self
             .service
-            .list_tools(None)
+            .list_all_tools()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_tools failed: {}", e)))?;
-        Ok(result.tools)
+        Ok(result)
     }
 
     /// Call a tool by name with JSON arguments.
@@ -80,10 +80,10 @@ impl StdioClient {
     pub async fn list_prompts(&self) -> Result<Vec<Prompt>> {
         let result = self
             .service
-            .list_prompts(None)
+            .list_all_prompts()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_prompts failed: {}", e)))?;
-        Ok(result.prompts)
+        Ok(result)
     }
 
     /// Get a prompt by name.
@@ -107,10 +107,15 @@ impl StdioClient {
     pub async fn list_resources(&self) -> Result<Vec<Resource>> {
         let result = self
             .service
-            .list_resources(None)
+            .list_all_resources()
             .await
             .map_err(|e| SxmcError::McpError(format!("list_resources failed: {}", e)))?;
-        Ok(result.resources)
+        Ok(result)
+    }
+
+    /// Return negotiated MCP server information from the initialization handshake.
+    pub fn server_info(&self) -> Option<ServerInfo> {
+        self.service.peer_info().cloned()
     }
 
     /// Read a resource by URI.

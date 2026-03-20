@@ -9,9 +9,12 @@ bridge: **`sxmc stdio`** and **`sxmc http`**.
 `sxmc stdio` and `sxmc http` currently provide:
 
 - listing of **tools**, **prompts**, and **resources**
+- per-surface discovery with `--list-tools`, `--list-prompts`, and `--list-resources`
 - invocation of **tools**
 - fetching of **prompts** with `--prompt`
 - reading of **resources** with `--resource`
+- structured server introspection with `--describe`
+- single-tool schema/help inspection with `--describe-tool`
 - pretty-printing and shell-friendly inspection of MCP results
 
 So the precise contract is:
@@ -32,6 +35,7 @@ So the precise contract is:
 - CI checks and scripted workflows
 - debugging MCP servers outside a full agent/IDE
 - inspecting the available tool/prompt/resource surface quickly with `--list`
+- checking negotiated capabilities and schemas with `--describe`
 - pulling one prompt or resource on demand without loading the whole server into an IDE
 
 ## Implementation (source)
@@ -46,6 +50,9 @@ So the precise contract is:
 
 ```bash
 sxmc stdio "sxmc serve" --list
+sxmc stdio "sxmc serve" --list-tools
+sxmc stdio "sxmc serve" --describe --pretty
+sxmc stdio "sxmc serve" --describe-tool get_skill_details
 ```
 
 Expected: hybrid tools (`get_available_skills`, `get_skill_details`, `get_skill_related_file`) plus per-skill script tools when skills are discovered.
@@ -82,6 +89,7 @@ In another:
 
 ```bash
 sxmc http http://127.0.0.1:8765/mcp --list
+sxmc http http://127.0.0.1:8765/mcp --describe --pretty
 ```
 
 Expected: same tool list as stdio serve for the same `--paths` (prompts/resources included).
@@ -106,6 +114,7 @@ Expected: prompt/resource retrieval works the same way over remote streamable HT
 ## Caveats
 
 - The bridge only works as well as the **upstream MCP server** (auth, crashes, non-compliant responses).
+- `--list` is capability-aware and now skips unsupported prompt/resource surfaces on tool-only servers instead of failing the whole command.
 - **Tool names and arguments** must match the server’s schema (same as any MCP client).
 - `sxmc stdio` accepts either shell-style quoting or a JSON-array command spec.
   For complex quoting, prefer a JSON array such as `["sxmc","serve","--paths","tests/fixtures"]`

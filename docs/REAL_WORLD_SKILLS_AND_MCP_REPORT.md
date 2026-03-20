@@ -7,6 +7,11 @@
 
 This document records **manual integration tests**: five **real** skill directories taken from this machine (user skills, Cursor built-ins, OpenClaw npm bundle) and five **public** MCP servers invoked via **`npx`**. It is **not** a performance benchmark; it focuses on **whether sxmc behaves usefully** and **where friction appears**.
 
+Maintainer note: the original finding about prompt-less servers making
+`sxmc stdio ... --list` exit non-zero has since been addressed on `master`.
+Current behavior is capability-aware: unsupported prompt/resource surfaces are
+skipped during `--list` instead of failing the whole command.
+
 ---
 
 ## 1. Five real-world skills
@@ -107,11 +112,11 @@ sxmc stdio "npx -y <package> [args…]" --list
 
 ### 2.3 Interpretation (important)
 
-Many official MCP servers implement **tools** (and sometimes **resources**) but **do not** implement the **`prompts/list`** capability. **sxmc**’s `stdio`/`http` **`--list` path appears to call `list_prompts` unconditionally** after listing tools. When the server returns **`-32601`**, the **overall CLI exits non-zero** even though **tool discovery already succeeded**.
+Many official MCP servers implement **tools** (and sometimes **resources**) but **do not** implement the **`prompts/list`** capability. At test time, **sxmc**’s `stdio`/`http` **`--list` path called `list_prompts` unconditionally** after listing tools. When the server returned **`-32601`**, the **overall CLI exited non-zero** even though **tool discovery already succeeded**.
 
 **Practical impact:**
 
-- **`sxmc stdio "…" --list`** looks **failed** for many real servers.
+- At test time, **`sxmc stdio "…" --list`** looked **failed** for many real servers.
 - **Tool invocation** may still work: e.g. **`server-everything`**:
 
   ```bash
@@ -120,7 +125,9 @@ Many official MCP servers implement **tools** (and sometimes **resources**) but 
 
   returned: `The sum of 2 and 3 is 5.` (**success**).
 
-So: **MCP → CLI works**, but **`--list` UX is brittle** on prompt-less servers unless sxmc treats “prompts not supported” as **non-fatal**.
+So: **MCP → CLI works**, and the recorded brittleness around prompt-less servers
+was a good trigger for making `--list` treat unsupported prompts/resources as
+**non-fatal**.
 
 ### 2.4 Follow-up test (`server-memory`)
 
@@ -135,14 +142,14 @@ Calling `read_graph` with guessed CLI args produced **`-32602` input validation*
 | **Load diverse real skills** | **Works** — symlinked multi-root bundle is OK. |
 | **`skills list` / `info` / `run` / `scan`** | **Works** for all five; `run` is **prompt dump**, not automation. |
 | **Serve 5 skills as MCP** | **Works** — prompts + hybrid tools + resources as designed. |
-| **Bridge official MCP servers** | **Partially** — **tool listing** works; **`--list` often exits 1** if prompts unsupported. |
+| **Bridge official MCP servers** | **Useful** — **tool listing** works, and current `master` treats unsupported prompts/resources as non-fatal during `--list`. |
 | **Wrong npm package name** | **User error surface** — `server-fetch` 404; verify package names on npm. |
 
 ---
 
 ## 4. Recommendations (product / docs)
 
-1. **MCP client `list`:** If `list_prompts` returns **`-32601`**, treat as **“no prompts”** and exit **0** after listing tools (and resources if implemented).
+1. **MCP client `list`:** Landed on `master` — if prompts/resources are not supported, `--list` now skips those surfaces instead of exiting non-zero.
 2. **Docs:** Call out that **`@modelcontextprotocol/server-everything`** is the easiest **known-good** server for **`sxmc stdio … --list`** demos.
 3. **Docs:** Link to npm scope **`@modelcontextprotocol/`** package list; **`server-fetch`** name may be wrong or unpublished.
 
@@ -162,7 +169,7 @@ sxmc stdio "sxmc serve --paths /tmp/sxmc-realworld-skills" --list
 # MCP (requires Node + network)
 sxmc stdio "npx -y @modelcontextprotocol/server-everything" --list
 sxmc stdio "npx -y @modelcontextprotocol/server-everything" get-sum a=2 b=3 --pretty
-sxmc stdio "npx -y @modelcontextprotocol/server-memory" --list   # expect exit 1 today
+sxmc stdio "npx -y @modelcontextprotocol/server-memory" --list   # current master should succeed and skip prompts
 ```
 
 ---

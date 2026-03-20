@@ -1,9 +1,9 @@
 use clap::ValueEnum;
 use rmcp::model::{
-    CallToolResult, GetPromptResult, PromptMessageContent, PromptMessageRole, ReadResourceResult,
-    ResourceContents,
+    CallToolResult, GetPromptResult, Prompt, PromptMessageContent, PromptMessageRole,
+    ReadResourceResult, Resource, ResourceContents, ServerInfo, Tool,
 };
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum StructuredOutputFormat {
@@ -111,7 +111,7 @@ pub fn format_resource_result(result: &ReadResourceResult, pretty: bool) -> Stri
 }
 
 /// Format MCP tools as a list for display.
-pub fn format_tool_list(tools: &[rmcp::model::Tool], search: Option<&str>) -> String {
+pub fn format_tool_list(tools: &[Tool], search: Option<&str>) -> String {
     let mut lines = Vec::new();
 
     for tool in tools {
@@ -144,7 +144,7 @@ pub fn format_tool_list(tools: &[rmcp::model::Tool], search: Option<&str>) -> St
 }
 
 /// Format MCP prompts as a list for display.
-pub fn format_prompt_list(prompts: &[rmcp::model::Prompt]) -> String {
+pub fn format_prompt_list(prompts: &[Prompt]) -> String {
     let mut lines = Vec::new();
 
     for prompt in prompts {
@@ -162,7 +162,7 @@ pub fn format_prompt_list(prompts: &[rmcp::model::Prompt]) -> String {
 }
 
 /// Format MCP resources as a list for display.
-pub fn format_resource_list(resources: &[rmcp::model::Resource]) -> String {
+pub fn format_resource_list(resources: &[Resource]) -> String {
     let mut lines = Vec::new();
 
     for resource in resources {
@@ -177,6 +177,202 @@ pub fn format_resource_list(resources: &[rmcp::model::Resource]) -> String {
     }
 
     format!("Resources ({}):\n{}", resources.len(), lines.join("\n"))
+}
+
+pub fn format_tool_detail(tool: &Tool, pretty: bool) -> String {
+    let summary = summarize_tool(tool);
+    if pretty {
+        return serde_json::to_string_pretty(&summary).unwrap_or_else(|_| summary.to_string());
+    }
+
+    let mut lines = vec![format!("Tool: {}", tool.name)];
+
+    if let Some(title) = &tool.title {
+        lines.push(format!("Title: {}", title));
+    }
+    if let Some(description) = &tool.description {
+        lines.push(format!("Description: {}", description));
+    }
+
+    let parameters = summary["parameters"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if parameters.is_empty() {
+        lines.push("Parameters: none".to_string());
+    } else {
+        lines.push(format!("Parameters ({}):", parameters.len()));
+        for parameter in parameters {
+            let name = parameter["name"].as_str().unwrap_or("unknown");
+            let ty = parameter["type"].as_str().unwrap_or("any");
+            let required = parameter["required"].as_bool().unwrap_or(false);
+            let mut line = format!(
+                "  {}{} ({})",
+                name,
+                if required { " [required]" } else { "" },
+                ty
+            );
+            if let Some(description) = parameter["description"].as_str() {
+                line.push_str(&format!(" - {}", description));
+            }
+            if let Some(values) = parameter["enum"].as_array() {
+                let values = values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if !values.is_empty() {
+                    line.push_str(&format!(" [enum: {}]", values));
+                }
+            }
+            lines.push(line);
+        }
+    }
+
+    let capabilities = summary["execution"].clone();
+    if capabilities != Value::Null {
+        lines.push(format!("Execution: {}", capabilities));
+    }
+
+    let annotations = summary["annotations"].clone();
+    if annotations != Value::Null {
+        lines.push(format!("Hints: {}", annotations));
+    }
+
+    lines.join("\n")
+}
+
+pub fn summarize_server_info(server_info: Option<&ServerInfo>) -> Value {
+    match server_info {
+        Some(info) => json!({
+            "protocol_version": info.protocol_version.to_string(),
+            "server": {
+                "name": info.server_info.name,
+                "version": info.server_info.version,
+                "title": info.server_info.title,
+            },
+            "instructions": info.instructions,
+            "capabilities": {
+                "tools": info.capabilities.tools.is_some(),
+                "prompts": info.capabilities.prompts.is_some(),
+                "resources": info.capabilities.resources.is_some(),
+                "logging": info.capabilities.logging.is_some(),
+                "completions": info.capabilities.completions.is_some(),
+                "tasks": info.capabilities.tasks.is_some(),
+                "extensions": info.capabilities.extensions.is_some(),
+            }
+        }),
+        None => json!({
+            "protocol_version": Value::Null,
+            "server": Value::Null,
+            "instructions": Value::Null,
+            "capabilities": {
+                "tools": Value::Null,
+                "prompts": Value::Null,
+                "resources": Value::Null,
+                "logging": Value::Null,
+                "completions": Value::Null,
+                "tasks": Value::Null,
+                "extensions": Value::Null,
+            }
+        }),
+    }
+}
+
+pub fn summarize_tool(tool: &Tool) -> Value {
+    let required = tool
+        .input_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(ToString::to_string))
+        .collect::<Vec<_>>();
+
+    let parameters = tool
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .map(|(name, schema)| summarize_schema_property(name, schema, &required))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json!({
+        "name": tool.name,
+        "title": tool.title,
+        "description": tool.description,
+        "parameters": parameters,
+        "annotations": tool.annotations.as_ref().map(|annotations| json!({
+            "read_only": annotations.read_only_hint,
+            "destructive": annotations.destructive_hint,
+            "idempotent": annotations.idempotent_hint,
+            "open_world": annotations.open_world_hint,
+        })),
+        "execution": tool.execution.as_ref().map(|execution| json!({
+            "task_support": execution.task_support.map(|support| format!("{:?}", support).to_lowercase()),
+        })),
+        "input_schema": Value::Object((*tool.input_schema).clone()),
+        "output_schema": tool
+            .output_schema
+            .as_ref()
+            .map(|schema| Value::Object((**schema).clone())),
+    })
+}
+
+pub fn summarize_prompt(prompt: &Prompt) -> Value {
+    json!({
+        "name": prompt.name,
+        "title": prompt.title,
+        "description": prompt.description,
+        "arguments": prompt.arguments.as_ref().map(|arguments| {
+            arguments.iter().map(|argument| {
+                json!({
+                    "name": argument.name,
+                    "title": argument.title,
+                    "description": argument.description,
+                    "required": argument.required.unwrap_or(false),
+                })
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+    })
+}
+
+pub fn summarize_resource(resource: &Resource) -> Value {
+    json!({
+        "name": resource.name,
+        "title": resource.title,
+        "description": resource.description,
+        "uri": resource.uri,
+        "mime_type": resource.mime_type,
+        "size": resource.size,
+    })
+}
+
+fn summarize_schema_property(name: &str, schema: &Value, required: &[String]) -> Value {
+    let schema_type = schema
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("any")
+        .to_string();
+
+    let enum_values = schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    json!({
+        "name": name,
+        "type": schema_type,
+        "required": required.iter().any(|value| value == name),
+        "description": schema.get("description").and_then(Value::as_str),
+        "enum": enum_values,
+    })
 }
 
 fn encode_toon(value: &Value) -> String {

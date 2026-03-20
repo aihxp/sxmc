@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
+use serde_json::{json, Value};
 use std::path::PathBuf;
 
 use std::collections::HashMap;
@@ -81,9 +83,29 @@ enum Commands {
         #[arg(long)]
         list: bool,
 
+        /// List only tools
+        #[arg(long)]
+        list_tools: bool,
+
+        /// List only prompts
+        #[arg(long)]
+        list_prompts: bool,
+
+        /// List only resources
+        #[arg(long)]
+        list_resources: bool,
+
         /// Search/filter tools by name or description
         #[arg(long)]
         search: Option<String>,
+
+        /// Describe the negotiated MCP server surface as structured JSON
+        #[arg(long, conflicts_with = "describe_tool")]
+        describe: bool,
+
+        /// Show detailed schema/help for a single tool
+        #[arg(long, value_name = "TOOL", conflicts_with = "describe")]
+        describe_tool: Option<String>,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -119,9 +141,29 @@ enum Commands {
         #[arg(long)]
         list: bool,
 
+        /// List only tools
+        #[arg(long)]
+        list_tools: bool,
+
+        /// List only prompts
+        #[arg(long)]
+        list_prompts: bool,
+
+        /// List only resources
+        #[arg(long)]
+        list_resources: bool,
+
         /// Search/filter tools by name or description
         #[arg(long)]
         search: Option<String>,
+
+        /// Describe the negotiated MCP server surface as structured JSON
+        #[arg(long, conflicts_with = "describe_tool")]
+        describe: bool,
+
+        /// Show detailed schema/help for a single tool
+        #[arg(long, value_name = "TOOL", conflicts_with = "describe")]
+        describe_tool: Option<String>,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -411,6 +453,59 @@ fn parse_optional_secret(secret: Option<String>) -> Result<Option<String>> {
     secret.map(|value| resolve_secret(&value)).transpose()
 }
 
+#[derive(Clone, Copy)]
+enum McpSurface {
+    Tools,
+    Prompts,
+    Resources,
+}
+
+impl McpSurface {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tools => "tool",
+            Self::Prompts => "prompt",
+            Self::Resources => "resource",
+        }
+    }
+
+    fn plural_label(self) -> &'static str {
+        match self {
+            Self::Tools => "tools",
+            Self::Prompts => "prompts",
+            Self::Resources => "resources",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct McpCapabilities {
+    tools: Option<bool>,
+    prompts: Option<bool>,
+    resources: Option<bool>,
+}
+
+impl McpCapabilities {
+    fn from_server_info(server_info: Option<&ServerInfo>) -> Self {
+        match server_info {
+            Some(info) => Self {
+                tools: Some(info.capabilities.tools.is_some()),
+                prompts: Some(info.capabilities.prompts.is_some()),
+                resources: Some(info.capabilities.resources.is_some()),
+            },
+            None => Self::default(),
+        }
+    }
+
+    fn supports(&self, surface: McpSurface) -> Option<bool> {
+        match surface {
+            McpSurface::Tools => self.tools,
+            McpSurface::Prompts => self.prompts,
+            McpSurface::Resources => self.resources,
+        }
+    }
+}
+
 fn is_capability_not_supported(error: &sxmc::error::SxmcError) -> bool {
     match error {
         sxmc::error::SxmcError::McpError(message) => {
@@ -423,21 +518,68 @@ fn is_capability_not_supported(error: &sxmc::error::SxmcError) -> bool {
     }
 }
 
-async fn list_optional_surface<T, F>(label: &str, list_future: F) -> Result<Vec<T>>
+async fn list_optional_surface<T, F>(
+    surface: McpSurface,
+    advertised: Option<bool>,
+    list_future: F,
+) -> Result<Vec<T>>
 where
     F: std::future::Future<Output = Result<Vec<T>>>,
 {
+    if advertised == Some(false) {
+        eprintln!(
+            "[sxmc] Skipping {} listing because the MCP server did not advertise that capability during initialization.",
+            surface.label()
+        );
+        return Ok(Vec::new());
+    }
+
     match list_future.await {
         Ok(items) => Ok(items),
         Err(error) if is_capability_not_supported(&error) => {
             eprintln!(
                 "[sxmc] Skipping {} listing because the MCP server does not advertise that capability.",
-                label
+                surface.label()
             );
             Ok(Vec::new())
         }
         Err(error) => Err(error),
     }
+}
+
+fn print_empty_surface_notice(surface: McpSurface, advertised: Option<bool>) {
+    if advertised == Some(false) {
+        println!(
+            "No {} available. The MCP server did not advertise {} support.",
+            surface.plural_label(),
+            surface.label()
+        );
+    } else {
+        match surface {
+            McpSurface::Tools => println!("No tools available."),
+            McpSurface::Prompts => println!("No prompts available."),
+            McpSurface::Resources => println!("No resources available."),
+        }
+    }
+}
+
+fn build_mcp_description(
+    server_info: Option<&ServerInfo>,
+    tools: &[Tool],
+    prompts: &[Prompt],
+    resources: &[Resource],
+) -> Value {
+    let mut description = output::summarize_server_info(server_info);
+    description["counts"] = json!({
+        "tools": tools.len(),
+        "prompts": prompts.len(),
+        "resources": resources.len(),
+    });
+    description["tools"] = Value::Array(tools.iter().map(output::summarize_tool).collect());
+    description["prompts"] = Value::Array(prompts.iter().map(output::summarize_prompt).collect());
+    description["resources"] =
+        Value::Array(resources.iter().map(output::summarize_resource).collect());
+    description
 }
 
 fn parse_source_type(source_type: &str) -> SourceType {
@@ -533,33 +675,131 @@ async fn main() -> anyhow::Result<()> {
             resource_uri,
             args,
             list,
+            list_tools,
+            list_prompts,
+            list_resources,
             search,
+            describe,
+            describe_tool,
             pretty,
             env_vars,
             cwd,
         } => {
             let env = parse_env_vars(&env_vars);
             let client = mcp_stdio::StdioClient::connect(&command, &env, cwd.as_deref()).await?;
+            let server_info = client.server_info();
+            let capabilities = McpCapabilities::from_server_info(server_info.as_ref());
             let (tool_name, tool_args) = args
                 .split_first()
                 .map(|(name, rest)| (Some(name.as_str()), rest))
                 .unwrap_or((None, &[]));
 
-            if list || search.is_some() {
-                let tools = client.list_tools().await?;
-                println!("{}", output::format_tool_list(&tools, search.as_deref()));
+            let introspection_requested = list
+                || list_tools
+                || list_prompts
+                || list_resources
+                || search.is_some()
+                || describe
+                || describe_tool.is_some();
 
-                let prompts = list_optional_surface("prompt", client.list_prompts()).await?;
-                if !prompts.is_empty() {
-                    println!();
-                    println!("{}", output::format_prompt_list(&prompts));
-                }
+            if introspection_requested {
+                let needs_tools =
+                    list || list_tools || search.is_some() || describe || describe_tool.is_some();
+                let needs_prompts = list || list_prompts || describe;
+                let needs_resources = list || list_resources || describe;
 
-                let resources =
-                    list_optional_surface("resource", client.list_resources()).await?;
-                if !resources.is_empty() {
-                    println!();
-                    println!("{}", output::format_resource_list(&resources));
+                let tools = if needs_tools {
+                    list_optional_surface(
+                        McpSurface::Tools,
+                        capabilities.supports(McpSurface::Tools),
+                        client.list_tools(),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+
+                if let Some(name) = describe_tool {
+                    let tool = tools
+                        .iter()
+                        .find(|tool| tool.name.as_ref() == name)
+                        .ok_or_else(|| {
+                            sxmc::error::SxmcError::Other(format!("Tool not found: {}", name))
+                        })?;
+                    println!("{}", output::format_tool_detail(tool, pretty));
+                } else if describe {
+                    let prompts = if needs_prompts {
+                        list_optional_surface(
+                            McpSurface::Prompts,
+                            capabilities.supports(McpSurface::Prompts),
+                            client.list_prompts(),
+                        )
+                        .await?
+                    } else {
+                        Vec::new()
+                    };
+                    let resources = if needs_resources {
+                        list_optional_surface(
+                            McpSurface::Resources,
+                            capabilities.supports(McpSurface::Resources),
+                            client.list_resources(),
+                        )
+                        .await?
+                    } else {
+                        Vec::new()
+                    };
+                    let description =
+                        build_mcp_description(server_info.as_ref(), &tools, &prompts, &resources);
+                    let format = output::resolve_structured_format(None, pretty);
+                    println!("{}", output::format_structured_value(&description, format));
+                } else {
+                    let mut printed_any = false;
+
+                    if list || list_tools || search.is_some() {
+                        println!("{}", output::format_tool_list(&tools, search.as_deref()));
+                        printed_any = true;
+                    }
+
+                    if list || list_prompts {
+                        let prompts = list_optional_surface(
+                            McpSurface::Prompts,
+                            capabilities.supports(McpSurface::Prompts),
+                            client.list_prompts(),
+                        )
+                        .await?;
+                        if printed_any {
+                            println!();
+                        }
+                        if prompts.is_empty() {
+                            print_empty_surface_notice(
+                                McpSurface::Prompts,
+                                capabilities.supports(McpSurface::Prompts),
+                            );
+                        } else {
+                            println!("{}", output::format_prompt_list(&prompts));
+                        }
+                        printed_any = true;
+                    }
+
+                    if list || list_resources {
+                        let resources = list_optional_surface(
+                            McpSurface::Resources,
+                            capabilities.supports(McpSurface::Resources),
+                            client.list_resources(),
+                        )
+                        .await?;
+                        if printed_any {
+                            println!();
+                        }
+                        if resources.is_empty() {
+                            print_empty_surface_notice(
+                                McpSurface::Resources,
+                                capabilities.supports(McpSurface::Resources),
+                            );
+                        } else {
+                            println!("{}", output::format_resource_list(&resources));
+                        }
+                    }
                 }
             } else if let Some(name) = prompt {
                 let arguments = parse_kv_args(&args);
@@ -591,32 +831,130 @@ async fn main() -> anyhow::Result<()> {
             resource_uri,
             args,
             list,
+            list_tools,
+            list_prompts,
+            list_resources,
             search,
+            describe,
+            describe_tool,
             pretty,
             auth_headers,
         } => {
             let headers = parse_headers(&auth_headers)?;
             let client = mcp_http::HttpClient::connect(&url, &headers).await?;
+            let server_info = client.server_info();
+            let capabilities = McpCapabilities::from_server_info(server_info.as_ref());
             let (tool_name, tool_args) = args
                 .split_first()
                 .map(|(name, rest)| (Some(name.as_str()), rest))
                 .unwrap_or((None, &[]));
 
-            if list || search.is_some() {
-                let tools = client.list_tools().await?;
-                println!("{}", output::format_tool_list(&tools, search.as_deref()));
+            let introspection_requested = list
+                || list_tools
+                || list_prompts
+                || list_resources
+                || search.is_some()
+                || describe
+                || describe_tool.is_some();
 
-                let prompts = list_optional_surface("prompt", client.list_prompts()).await?;
-                if !prompts.is_empty() {
-                    println!();
-                    println!("{}", output::format_prompt_list(&prompts));
-                }
+            if introspection_requested {
+                let needs_tools =
+                    list || list_tools || search.is_some() || describe || describe_tool.is_some();
+                let needs_prompts = list || list_prompts || describe;
+                let needs_resources = list || list_resources || describe;
 
-                let resources =
-                    list_optional_surface("resource", client.list_resources()).await?;
-                if !resources.is_empty() {
-                    println!();
-                    println!("{}", output::format_resource_list(&resources));
+                let tools = if needs_tools {
+                    list_optional_surface(
+                        McpSurface::Tools,
+                        capabilities.supports(McpSurface::Tools),
+                        client.list_tools(),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+
+                if let Some(name) = describe_tool {
+                    let tool = tools
+                        .iter()
+                        .find(|tool| tool.name.as_ref() == name)
+                        .ok_or_else(|| {
+                            sxmc::error::SxmcError::Other(format!("Tool not found: {}", name))
+                        })?;
+                    println!("{}", output::format_tool_detail(tool, pretty));
+                } else if describe {
+                    let prompts = if needs_prompts {
+                        list_optional_surface(
+                            McpSurface::Prompts,
+                            capabilities.supports(McpSurface::Prompts),
+                            client.list_prompts(),
+                        )
+                        .await?
+                    } else {
+                        Vec::new()
+                    };
+                    let resources = if needs_resources {
+                        list_optional_surface(
+                            McpSurface::Resources,
+                            capabilities.supports(McpSurface::Resources),
+                            client.list_resources(),
+                        )
+                        .await?
+                    } else {
+                        Vec::new()
+                    };
+                    let description =
+                        build_mcp_description(server_info.as_ref(), &tools, &prompts, &resources);
+                    let format = output::resolve_structured_format(None, pretty);
+                    println!("{}", output::format_structured_value(&description, format));
+                } else {
+                    let mut printed_any = false;
+
+                    if list || list_tools || search.is_some() {
+                        println!("{}", output::format_tool_list(&tools, search.as_deref()));
+                        printed_any = true;
+                    }
+
+                    if list || list_prompts {
+                        let prompts = list_optional_surface(
+                            McpSurface::Prompts,
+                            capabilities.supports(McpSurface::Prompts),
+                            client.list_prompts(),
+                        )
+                        .await?;
+                        if printed_any {
+                            println!();
+                        }
+                        if prompts.is_empty() {
+                            print_empty_surface_notice(
+                                McpSurface::Prompts,
+                                capabilities.supports(McpSurface::Prompts),
+                            );
+                        } else {
+                            println!("{}", output::format_prompt_list(&prompts));
+                        }
+                        printed_any = true;
+                    }
+
+                    if list || list_resources {
+                        let resources = list_optional_surface(
+                            McpSurface::Resources,
+                            capabilities.supports(McpSurface::Resources),
+                            client.list_resources(),
+                        )
+                        .await?;
+                        if printed_any {
+                            println!();
+                        }
+                        if resources.is_empty() {
+                            print_empty_surface_notice(
+                                McpSurface::Resources,
+                                capabilities.supports(McpSurface::Resources),
+                            );
+                        } else {
+                            println!("{}", output::format_resource_list(&resources));
+                        }
+                    }
                 }
             } else if let Some(name) = prompt {
                 let arguments = parse_kv_args(&args);
@@ -959,48 +1297,6 @@ fn cmd_skills_list(paths: &[PathBuf], json_output: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{is_capability_not_supported, list_optional_surface};
-    use sxmc::error::SxmcError;
-
-    #[test]
-    fn detects_json_rpc_method_not_found_as_optional_capability_gap() {
-        let error = SxmcError::McpError(
-            "list_prompts failed: JSON-RPC error -32601: Method not found".into(),
-        );
-        assert!(is_capability_not_supported(&error));
-    }
-
-    #[test]
-    fn detects_textual_not_supported_errors() {
-        let error = SxmcError::McpError("list_resources failed: capability not supported".into());
-        assert!(is_capability_not_supported(&error));
-    }
-
-    #[test]
-    fn does_not_hide_real_failures() {
-        let error = SxmcError::McpError("list_prompts failed: connection reset".into());
-        assert!(!is_capability_not_supported(&error));
-    }
-
-    #[tokio::test]
-    async fn optional_surface_returns_empty_when_capability_is_missing() {
-        let items = list_optional_surface::<String, _>(
-            "prompt",
-            async {
-                Err(SxmcError::McpError(
-                    "list_prompts failed: JSON-RPC error -32601: Method not found".into(),
-                ))
-            },
-        )
-        .await
-        .unwrap();
-
-        assert!(items.is_empty());
-    }
-}
-
 fn cmd_skills_info(paths: &[PathBuf], name: &str) -> Result<()> {
     let skill_dirs = discovery::discover_skills(paths)?;
 
@@ -1082,4 +1378,56 @@ async fn cmd_api(
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_capability_not_supported, list_optional_surface, McpSurface};
+    use sxmc::error::SxmcError;
+
+    #[test]
+    fn detects_json_rpc_method_not_found_as_optional_capability_gap() {
+        let error = SxmcError::McpError(
+            "list_prompts failed: JSON-RPC error -32601: Method not found".into(),
+        );
+        assert!(is_capability_not_supported(&error));
+    }
+
+    #[test]
+    fn detects_textual_not_supported_errors() {
+        let error = SxmcError::McpError("list_resources failed: capability not supported".into());
+        assert!(is_capability_not_supported(&error));
+    }
+
+    #[test]
+    fn does_not_hide_real_failures() {
+        let error = SxmcError::McpError("list_prompts failed: connection reset".into());
+        assert!(!is_capability_not_supported(&error));
+    }
+
+    #[tokio::test]
+    async fn optional_surface_returns_empty_when_capability_is_missing() {
+        let items = list_optional_surface::<String, _>(McpSurface::Prompts, None, async {
+            Err(SxmcError::McpError(
+                "list_prompts failed: JSON-RPC error -32601: Method not found".into(),
+            ))
+        })
+        .await
+        .unwrap();
+
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn optional_surface_skips_when_server_does_not_advertise_capability() {
+        let items = list_optional_surface::<String, _>(McpSurface::Resources, Some(false), async {
+            panic!("list future should not be polled when capability is absent");
+            #[allow(unreachable_code)]
+            Ok(Vec::new())
+        })
+        .await
+        .unwrap();
+
+        assert!(items.is_empty());
+    }
 }

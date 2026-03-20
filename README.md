@@ -174,19 +174,28 @@ sxmc http https://mcp.example.com/mcp --resource "repo://octocat/hello-world/REA
 
 `sxmc stdio` and `sxmc http` are MCP bridges that can:
 - list **tools**, **prompts**, and **resources**
+- list one surface at a time with `--list-tools`, `--list-prompts`, or `--list-resources`
 - invoke **tools**
 - fetch **prompts** with `--prompt`
 - read **resources** with `--resource`
+- describe the negotiated server surface with `--describe`
+- show one tool’s schema/help with `--describe-tool NAME`
 
 This makes them especially useful for shell automation, CI, debugging, and
 inspecting an MCP server outside an IDE or agent UI.
+When a server is tool-only and does not implement prompts/resources,
+generic `--list` now stays successful and skips unsupported surfaces instead of
+failing the whole command.
 
 That means skills can flow through both stages in one go:
 
 ```bash
 # Serve local skills over MCP, then bridge that MCP server back into CLI
 sxmc stdio "sxmc serve --paths tests/fixtures" --list
+sxmc stdio "sxmc serve --paths tests/fixtures" --list-tools
 sxmc stdio "sxmc serve --paths tests/fixtures" get_available_skills --pretty
+sxmc stdio "sxmc serve --paths tests/fixtures" --describe --pretty
+sxmc stdio "sxmc serve --paths tests/fixtures" --describe-tool get_skill_details
 sxmc stdio "sxmc serve --paths tests/fixtures" get_skill_details name=simple-skill --pretty
 sxmc stdio "sxmc serve --paths tests/fixtures" --prompt simple-skill arguments=friend
 sxmc stdio "sxmc serve --paths tests/fixtures" --resource \
@@ -202,6 +211,9 @@ Hosted MCP servers work the same way over HTTP:
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --list
+sxmc http http://127.0.0.1:8000/mcp \
+  --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
+  --describe --pretty
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --prompt simple-skill arguments=friend
@@ -395,8 +407,8 @@ SKILLS:
   skills create <api-url> [--output-dir DIR] [--auth-header K:V]
 
 CLIENT:
-  stdio <command> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--search] [--pretty] [--env K=V] [--cwd DIR]
-  http <url> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--search] [--pretty] [--auth-header K:V]
+  stdio <command> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--list-tools] [--list-prompts] [--list-resources] [--describe] [--describe-tool NAME] [--search] [--pretty] [--env K=V] [--cwd DIR]
+  http <url> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--list-tools] [--list-prompts] [--list-resources] [--describe] [--describe-tool NAME] [--search] [--pretty] [--auth-header K:V]
   api <source> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
   spec <source> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
   graphql <url> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
