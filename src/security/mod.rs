@@ -1,3 +1,9 @@
+//! Security scanning primitives for skills and MCP servers.
+//!
+//! The scanner is intentionally lightweight and heuristic-based. It is useful
+//! for catching obviously risky content early, not for proving something is
+//! completely safe.
+
 pub mod mcp_scanner;
 pub mod patterns;
 pub mod skill_scanner;
@@ -27,11 +33,17 @@ impl fmt::Display for Severity {
 /// A single security finding.
 #[derive(Debug, Clone)]
 pub struct Finding {
+    /// Stable rule identifier such as `SL-INJ-001`.
     pub code: String,
+    /// Severity assigned by the scanner.
     pub severity: Severity,
+    /// Short human-readable label.
     pub title: String,
+    /// Explanation of what was detected.
     pub description: String,
+    /// Optional logical location such as a file, tool name, or MCP path.
     pub location: Option<String>,
+    /// Optional 1-based line number when available.
     pub line: Option<usize>,
 }
 
@@ -55,11 +67,14 @@ impl fmt::Display for Finding {
 /// A security scan report.
 #[derive(Debug, Clone)]
 pub struct ScanReport {
+    /// The scanned target, such as a skill name or MCP server identifier.
     pub target: String,
+    /// All findings produced for that target.
     pub findings: Vec<Finding>,
 }
 
 impl ScanReport {
+    /// Create an empty report for a named target.
     pub fn new(target: &str) -> Self {
         Self {
             target: target.to_string(),
@@ -67,10 +82,12 @@ impl ScanReport {
         }
     }
 
+    /// Add a single finding to the report.
     pub fn add(&mut self, finding: Finding) {
         self.findings.push(finding);
     }
 
+    /// Return a copy of the report containing only findings at or above `min`.
     pub fn filtered(&self, min: Severity) -> Self {
         Self {
             target: self.target.clone(),
@@ -94,10 +111,12 @@ impl ScanReport {
             .any(|f| f.severity == Severity::Critical)
     }
 
+    /// Whether the report contains any `Error` or `Critical` findings.
     pub fn has_errors(&self) -> bool {
         self.findings.iter().any(|f| f.severity >= Severity::Error)
     }
 
+    /// Whether the scanner produced zero findings.
     pub fn is_clean(&self) -> bool {
         self.findings.is_empty()
     }

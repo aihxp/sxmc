@@ -10,13 +10,13 @@ Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
 
 ## Install
 
-Prebuilt binaries are intended to be distributed through GitHub Releases.
-Until the crate is published to crates.io, install from Git:
+Install from crates.io:
 
 ```bash
-cargo install --git https://github.com/aihxp/sxmc
+cargo install sxmc
 ```
 
+Prebuilt binaries are also intended to be distributed through GitHub Releases.
 Or build from source:
 
 ```bash

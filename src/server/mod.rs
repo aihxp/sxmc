@@ -1,3 +1,8 @@
+//! MCP server construction and transport serving.
+//!
+//! This module is the main bridge from parsed skills to runnable MCP servers.
+//! It supports both local stdio serving and remote streamable HTTP serving.
+
 pub mod handler;
 
 use std::path::PathBuf;
@@ -151,6 +156,9 @@ fn build_http_router(
 }
 
 /// Run the MCP server over streamable HTTP.
+///
+/// When `required_headers` is non-empty, every request to `/mcp` must include
+/// all configured header/value pairs.
 pub async fn serve_http(
     paths: &[PathBuf],
     host: &str,

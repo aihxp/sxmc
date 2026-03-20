@@ -34,8 +34,8 @@ sxmc serve --transport http --host 127.0.0.1 --port 8000 \
 ## Create a Release Tag
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The GitHub Actions release workflow will build archives for:
