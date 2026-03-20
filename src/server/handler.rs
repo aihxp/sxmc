@@ -261,216 +261,204 @@ impl ServerHandler for SkillsServer {
         )
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
-        async move {
-            let schema = Self::build_script_input_schema();
-            let mut tools = Self::hybrid_tools();
+    ) -> Result<ListToolsResult, McpError> {
+        let schema = Self::build_script_input_schema();
+        let mut tools = Self::hybrid_tools();
 
-            for skill in &self.skills {
-                for script in &skill.scripts {
-                    let tool_name = Self::make_tool_name(&skill.name, &script.name);
-                    let tool = Tool::new(
-                        tool_name,
-                        format!("Run {} from skill '{}'", script.name, skill.name),
-                        schema.clone(),
-                    );
-                    tools.push(tool);
-                }
+        for skill in &self.skills {
+            for script in &skill.scripts {
+                let tool_name = Self::make_tool_name(&skill.name, &script.name);
+                let tool = Tool::new(
+                    tool_name,
+                    format!("Run {} from skill '{}'", script.name, skill.name),
+                    schema.clone(),
+                );
+                tools.push(tool);
             }
-
-            Ok(ListToolsResult {
-                tools,
-                next_cursor: None,
-                meta: None,
-            })
         }
+
+        Ok(ListToolsResult {
+            tools,
+            next_cursor: None,
+            meta: None,
+        })
     }
 
-    fn call_tool(
+    async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
-        async move {
-            let tool_name: &str = request.name.as_ref();
+    ) -> Result<CallToolResult, McpError> {
+        let tool_name: &str = request.name.as_ref();
 
-            match tool_name {
-                TOOL_GET_AVAILABLE_SKILLS => return json_success(self.list_available_skills()),
-                TOOL_GET_SKILL_DETAILS => return self.get_skill_details(request.arguments.as_ref()),
-                TOOL_GET_SKILL_RELATED_FILE => {
-                    return self.get_skill_related_file(request.arguments.as_ref())
-                }
-                _ => {}
+        match tool_name {
+            TOOL_GET_AVAILABLE_SKILLS => return json_success(self.list_available_skills()),
+            TOOL_GET_SKILL_DETAILS => return self.get_skill_details(request.arguments.as_ref()),
+            TOOL_GET_SKILL_RELATED_FILE => {
+                return self.get_skill_related_file(request.arguments.as_ref())
             }
+            _ => {}
+        }
 
-            let (si, sci) = self.tool_index.get(tool_name).ok_or_else(|| {
-                McpError::invalid_params(format!("Unknown tool: {}", tool_name), None)
-            })?;
+        let (si, sci) = self.tool_index.get(tool_name).ok_or_else(|| {
+            McpError::invalid_params(format!("Unknown tool: {}", tool_name), None)
+        })?;
 
-            let skill = &self.skills[*si];
-            let script = &skill.scripts[*sci];
+        let skill = &self.skills[*si];
+        let script = &skill.scripts[*sci];
 
-            let args_str = request
-                .arguments
-                .as_ref()
-                .and_then(|args| args.get("args"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+        let args_str = request
+            .arguments
+            .as_ref()
+            .and_then(|args| args.get("args"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-            let args: Vec<&str> = if args_str.is_empty() {
-                vec![]
-            } else {
-                args_str.split_whitespace().collect()
-            };
+        let args: Vec<&str> = if args_str.is_empty() {
+            vec![]
+        } else {
+            args_str.split_whitespace().collect()
+        };
 
-            match executor::execute_script(&script.path, &args, &skill.base_dir, 30).await {
-                Ok(result) => {
-                    let mut output = result.stdout;
-                    if result.exit_code != 0 {
-                        output.push_str(&format!(
-                            "\nSTDERR: {}\nExit code: {}",
-                            result.stderr, result.exit_code
-                        ));
-                        return Ok(CallToolResult::error(vec![Content::text(output)]));
-                    }
-                    Ok(CallToolResult::success(vec![Content::text(output)]))
+        match executor::execute_script(&script.path, &args, &skill.base_dir, 30).await {
+            Ok(result) => {
+                let mut output = result.stdout;
+                if result.exit_code != 0 {
+                    output.push_str(&format!(
+                        "\nSTDERR: {}\nExit code: {}",
+                        result.stderr, result.exit_code
+                    ));
+                    return Ok(CallToolResult::error(vec![Content::text(output)]));
                 }
-                Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Ok(CallToolResult::success(vec![Content::text(output)]))
             }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
         }
     }
 
-    fn list_prompts(
+    async fn list_prompts(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
-        async move {
-            let prompts: Vec<Prompt> = self
-                .skills
-                .iter()
-                .map(|skill| {
-                    let args = skill
-                        .frontmatter
-                        .argument_hint
-                        .as_deref()
-                        .map(parse_argument_hint)
-                        .unwrap_or_default();
+    ) -> Result<ListPromptsResult, McpError> {
+        let prompts: Vec<Prompt> = self
+            .skills
+            .iter()
+            .map(|skill| {
+                let args = skill
+                    .frontmatter
+                    .argument_hint
+                    .as_deref()
+                    .map(parse_argument_hint)
+                    .unwrap_or_default();
 
-                    let prompt_args: Vec<PromptArgument> = args
-                        .iter()
-                        .map(|a| {
-                            PromptArgument::new(a.name.clone())
-                                .with_description(a.description.clone())
-                                .with_required(a.required)
-                        })
-                        .collect();
+                let prompt_args: Vec<PromptArgument> = args
+                    .iter()
+                    .map(|a| {
+                        PromptArgument::new(a.name.clone())
+                            .with_description(a.description.clone())
+                            .with_required(a.required)
+                    })
+                    .collect();
 
-                    Prompt::new(
-                        skill.name.clone(),
-                        Some(skill.frontmatter.description.clone()),
-                        Some(prompt_args),
-                    )
-                })
-                .collect();
-
-            Ok(ListPromptsResult {
-                prompts,
-                next_cursor: None,
-                meta: None,
+                Prompt::new(
+                    skill.name.clone(),
+                    Some(skill.frontmatter.description.clone()),
+                    Some(prompt_args),
+                )
             })
-        }
+            .collect();
+
+        Ok(ListPromptsResult {
+            prompts,
+            next_cursor: None,
+            meta: None,
+        })
     }
 
-    fn get_prompt(
+    async fn get_prompt(
         &self,
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<GetPromptResult, McpError>> + Send + '_ {
-        async move {
-            let skill_idx = self.skill_index.get(&request.name).ok_or_else(|| {
-                McpError::invalid_params(format!("Unknown prompt: {}", request.name), None)
-            })?;
+    ) -> Result<GetPromptResult, McpError> {
+        let skill_idx = self.skill_index.get(&request.name).ok_or_else(|| {
+            McpError::invalid_params(format!("Unknown prompt: {}", request.name), None)
+        })?;
 
-            let skill = &self.skills[*skill_idx];
-            let mut body = skill.body.clone();
+        let skill = &self.skills[*skill_idx];
+        let mut body = skill.body.clone();
 
-            if let Some(ref args) = request.arguments {
-                if let Some(full_args) = args.get("arguments").and_then(|v| v.as_str()) {
-                    body = body.replace("$ARGUMENTS", full_args);
-                }
-                for (key, value) in args {
-                    if let Some(val_str) = value.as_str() {
-                        let placeholder = format!("${}", key.to_uppercase().replace('-', "_"));
-                        body = body.replace(&placeholder, val_str);
-                    }
+        if let Some(ref args) = request.arguments {
+            if let Some(full_args) = args.get("arguments").and_then(|v| v.as_str()) {
+                body = body.replace("$ARGUMENTS", full_args);
+            }
+            for (key, value) in args {
+                if let Some(val_str) = value.as_str() {
+                    let placeholder = format!("${}", key.to_uppercase().replace('-', "_"));
+                    body = body.replace(&placeholder, val_str);
                 }
             }
-
-            body = body.replace("$ARGUMENTS", "");
-
-            let messages = vec![PromptMessage::new_text(PromptMessageRole::User, body)];
-
-            Ok(GetPromptResult::new(messages)
-                .with_description(skill.frontmatter.description.clone()))
         }
+
+        body = body.replace("$ARGUMENTS", "");
+
+        let messages = vec![PromptMessage::new_text(PromptMessageRole::User, body)];
+
+        Ok(GetPromptResult::new(messages)
+            .with_description(skill.frontmatter.description.clone()))
     }
 
-    fn list_resources(
+    async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
-        async move {
-            let resources: Vec<Resource> = self
-                .skills
-                .iter()
-                .flat_map(|skill| {
-                    skill.references.iter().map(|r| {
-                        let raw = RawResource::new(r.uri.clone(), r.name.clone())
-                            .with_description(format!("Reference from skill '{}'", skill.name))
-                            .with_mime_type(mime_from_name(&r.name));
-                        Annotated::new(raw, None)
-                    })
+    ) -> Result<ListResourcesResult, McpError> {
+        let resources: Vec<Resource> = self
+            .skills
+            .iter()
+            .flat_map(|skill| {
+                skill.references.iter().map(|r| {
+                    let raw = RawResource::new(r.uri.clone(), r.name.clone())
+                        .with_description(format!("Reference from skill '{}'", skill.name))
+                        .with_mime_type(mime_from_name(&r.name));
+                    Annotated::new(raw, None)
                 })
-                .collect();
-
-            Ok(ListResourcesResult {
-                resources,
-                next_cursor: None,
-                meta: None,
             })
-        }
+            .collect();
+
+        Ok(ListResourcesResult {
+            resources,
+            next_cursor: None,
+            meta: None,
+        })
     }
 
-    fn read_resource(
+    async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
-        async move {
-            let uri_str = request.uri.as_str();
+    ) -> Result<ReadResourceResult, McpError> {
+        let uri_str = request.uri.as_str();
 
-            let (si, ri) = self.resource_index.get(uri_str).ok_or_else(|| {
-                McpError::invalid_params(format!("Unknown resource: {}", uri_str), None)
-            })?;
+        let (si, ri) = self.resource_index.get(uri_str).ok_or_else(|| {
+            McpError::invalid_params(format!("Unknown resource: {}", uri_str), None)
+        })?;
 
-            let reference = &self.skills[*si].references[*ri];
-            let content = std::fs::read_to_string(&reference.path).map_err(|e| {
-                McpError::internal_error(
-                    format!("Failed to read {}: {}", reference.path.display(), e),
-                    None,
-                )
-            })?;
+        let reference = &self.skills[*si].references[*ri];
+        let content = std::fs::read_to_string(&reference.path).map_err(|e| {
+            McpError::internal_error(
+                format!("Failed to read {}: {}", reference.path.display(), e),
+                None,
+            )
+        })?;
 
-            Ok(ReadResourceResult::new(vec![ResourceContents::text(
-                content, uri_str,
-            )]))
-        }
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(
+            content, uri_str,
+        )]))
     }
 }
 

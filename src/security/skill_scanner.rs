@@ -191,7 +191,7 @@ fn check_secrets(text: &str, location: &str, report: &mut ScanReport) {
                     code: "SL-SEC-001".to_string(),
                     severity: Severity::Critical,
                     title: "Potential secret exposed".to_string(),
-                    description: format!("Line may contain a hardcoded secret or credential"),
+                    description: "Line may contain a hardcoded secret or credential".to_string(),
                     location: Some(location.to_string()),
                     line: Some(i + 1),
                 });

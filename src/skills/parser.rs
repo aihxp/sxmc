@@ -127,8 +127,7 @@ pub fn parse_argument_hint(hint: &str) -> Vec<SkillArgument> {
         let is_flag = token.starts_with('-');
         let name = token
             .trim_start_matches('-')
-            .replace(' ', "_")
-            .replace('-', "_");
+            .replace([' ', '-'], "_");
 
         args.push(SkillArgument {
             name,

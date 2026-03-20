@@ -424,7 +424,7 @@ fn extract_params(params: &[Value], spec: &Value) -> Vec<OpenApiParam> {
 fn resolve_ref<'a>(value: &'a Value, spec: &'a Value) -> &'a Value {
     if let Some(ref_path) = value.get("$ref").and_then(|v| v.as_str()) {
         if let Some(path) = ref_path.strip_prefix("#/") {
-            let pointer = format!("/{}", path.replace('/', "/"));
+            let pointer = format!("/{}", path);
             if let Some(resolved) = spec.pointer(&pointer) {
                 return resolved;
             }
@@ -438,8 +438,7 @@ fn generate_operation_id(method: &str, path: &str) -> String {
     let clean_path = path
         .trim_start_matches('/')
         .replace('/', "-")
-        .replace('{', "")
-        .replace('}', "");
+        .replace(['{', '}'], "");
 
     if clean_path.is_empty() {
         method.to_string()

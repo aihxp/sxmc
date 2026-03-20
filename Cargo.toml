@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "AI-agnostic Skills × MCP × CLI pipeline"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/aihxp/sxmc"
+homepage = "https://github.com/aihxp/sxmc"
+documentation = "https://docs.rs/sxmc"
+keywords = ["mcp", "cli", "skills", "openapi", "graphql"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".claude/**", "target/**"]
 
 [[bin]]
 name = "sxmc"

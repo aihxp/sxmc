@@ -10,6 +10,9 @@ Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
 
 ## Install
 
+Prebuilt binaries are intended to be distributed through GitHub Releases.
+Until the crate is published to crates.io, install from Git:
+
 ```bash
 cargo install --git https://github.com/aihxp/sxmc
 ```
@@ -22,6 +25,10 @@ cd sxmc
 cargo build --release
 # Binary at target/release/sxmc
 ```
+
+Additional setup and client-specific configuration examples are in
+[`docs/CLIENTS.md`](docs/CLIENTS.md). Release and publishing steps are in
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Quick Start
 
@@ -52,6 +59,9 @@ When served over MCP, each skill is exposed in a hybrid form:
 - `scripts/` as MCP tools
 - `references/` as MCP resources
 - generic retrieval tools for listing skills, reading skill details, and reading files
+
+This lets `sxmc` work well with local stdio-based MCP clients such as Codex,
+Cursor, Gemini CLI, and similar coding agents.
 
 ### Any MCP server as CLI
 
@@ -203,6 +213,16 @@ sxmc
 
 Built on [rmcp](https://github.com/nicepkg/rmcp) (official Rust MCP SDK).
 
+## Client Compatibility
+
+`sxmc` currently targets local stdio MCP clients first.
+
+- Supported now: Codex, Cursor, Gemini CLI, Claude Code-style local MCP clients
+- Not yet supported directly: ChatGPT Apps / Claude.ai remote connectors, because
+  `serve --transport sse` is still not implemented
+
+See [`docs/CLIENTS.md`](docs/CLIENTS.md) for setup examples.
+
 ## CLI Reference
 
 ```
@@ -243,7 +263,7 @@ Hybrid skill retrieval tools exposed by `serve`:
 ## Development
 
 ```bash
-# Run tests (74 total: 57 unit + 17 integration)
+# Run tests
 cargo test
 
 # Build

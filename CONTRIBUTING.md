@@ -78,3 +78,5 @@ That hybrid model is what allows `skills -> MCP -> CLI` to work through the exis
 - Include tests for new functionality
 - Run `cargo test` and `cargo clippy` before submitting
 - Update the README and CLI examples if changing user-facing behavior or flags
+- Update `docs/CLIENTS.md` if client integration steps or compatibility status change
+- Update `docs/RELEASING.md` if release or packaging steps change

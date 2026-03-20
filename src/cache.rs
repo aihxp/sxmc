@@ -91,10 +91,9 @@ impl Cache {
         if self.dir.exists() {
             for entry in std::fs::read_dir(&self.dir)
                 .map_err(|e| SxmcError::Other(format!("Failed to read cache dir: {}", e)))?
+                .flatten()
             {
-                if let Ok(entry) = entry {
-                    let _ = std::fs::remove_file(entry.path());
-                }
+                let _ = std::fs::remove_file(entry.path());
             }
         }
         Ok(())
