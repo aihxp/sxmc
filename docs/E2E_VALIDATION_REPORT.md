@@ -1,6 +1,6 @@
 # End-to-end validation report
 
-This document records a full validation pass of **sxmc** (skills, MCP stdio bridge, OpenAPI `api` command, scan, bake) and contrasts **crates.io v0.1.1** behavior with the fixes now landed on `master` and prepared for **v0.1.2**.
+This document records a full validation pass of **sxmc** (skills, MCP stdio bridge, OpenAPI `api` command, scan, bake) and contrasts **crates.io v0.1.1** behavior with fixes shipped in **crates.io v0.1.2** and on `master`.
 
 ## Environment (representative)
 
@@ -49,7 +49,7 @@ cargo test
 **Result:** All tests pass, including:
 
 - **61** library unit tests
-- **21** `tests/cli_integration.rs` integration tests
+- **22** `tests/cli_integration.rs` integration tests
 - **1** doc test
 
 Added coverage: `test_extract_base_url_relative_server` in `src/client/openapi.rs`.
@@ -63,17 +63,30 @@ cargo build --release
 # Binary: target/release/sxmc
 ```
 
-| Check | Command / expectation | With fixes on `master` / v0.1.2 |
+| Check | Command / expectation | `master` / **crates.io v0.1.2** |
 |-------|----------------------|----------------------|
 | Skills | `sxmc skills list` / `info` / `run` | OK |
 | Scan | `sxmc scan`, `sxmc scan --json` | OK |
 | MCP list tools | `sxmc stdio "sxmc serve" --list` | OK |
 | MCP run script | `sxmc stdio "sxmc serve" <tool>` **without** `--paths` | OK (prints script output) |
 | OpenAPI list | `sxmc api https://petstore3.swagger.io/api/v3/openapi.json --list` | OK |
+| OpenAPI call | `sxmc api … getInventory` | OK (HTTP + JSON; server may return 500 body) |
 | OpenAPI call | `sxmc api … findPetsByStatus status=available` | OK (JSON from API) |
+| Bake | `sxmc bake list` | OK |
 | Fixtures | `sxmc skills list --paths tests/fixtures` and `sxmc stdio "sxmc serve --paths $(pwd)/tests/fixtures" --list` | OK |
 
-**Contrast with crates.io v0.1.1 (unpatched):** MCP script invocation without `--paths` and live `api` calls (same Petstore URL) reproduce the two issues above.
+**Contrast with crates.io v0.1.1 (unpatched):** MCP script invocation without `--paths` and live `api` calls (same Petstore URL) reproduced the two issues above.
+
+### Post-release check: **crates.io v0.1.2** (2026-03-20)
+
+Re-validated using a clean install from crates.io:
+
+```bash
+cargo install sxmc --force   # → sxmc 0.1.2
+```
+
+- **`cargo test`** on `origin/master` at validation time: **61 + 22 + 1** tests, all passed.
+- **16 manual E2E checks** against `~/.cargo/bin/sxmc` (version line reported **0.1.2**): all passed, including MCP script tool **without** `--paths`, **`api getInventory`** (no client “builder error”), **`api findPetsByStatus`**, and fixture `--paths` flows.
 
 ## External service note: Petstore `getInventory`
 
@@ -81,7 +94,13 @@ Calling `getInventory` against the public Petstore may return **HTTP 500** or an
 
 ## Installing the validated build locally
 
-Until crates.io `v0.1.2` ships the fixes:
+From crates.io (recommended; includes the fixes as of **v0.1.2**):
+
+```bash
+cargo install sxmc
+```
+
+From a git checkout:
 
 ```bash
 git fetch origin
