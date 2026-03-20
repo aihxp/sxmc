@@ -60,7 +60,9 @@ Other channels:
 
 - GitHub Releases: prebuilt archives plus `.sha256` files
 - npm wrapper metadata aligned to `0.1.2`: [`packaging/npm`](packaging/npm)
+  The wrapper downloads and verifies release binaries during `postinstall`.
 - Homebrew formula pinned to `v0.1.2`: [`packaging/homebrew/sxmc.rb`](packaging/homebrew/sxmc.rb)
+  Tap guidance: [`packaging/homebrew/README.md`](packaging/homebrew/README.md)
 
 Or build from source:
 
@@ -77,6 +79,11 @@ Additional setup and client-specific configuration examples are in
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md), smoke checks are in
 [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md), and launch copy is in
 [`docs/LAUNCH.md`](docs/LAUNCH.md).
+
+Package-specific notes:
+
+- npm wrapper docs: [`packaging/npm/README.md`](packaging/npm/README.md)
+- Homebrew tap docs: [`packaging/homebrew/README.md`](packaging/homebrew/README.md)
 
 ## Quick Start
 

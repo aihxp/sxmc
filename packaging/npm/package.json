@@ -8,6 +8,9 @@
     "url": "git+https://github.com/aihxp/sxmc.git"
   },
   "homepage": "https://github.com/aihxp/sxmc",
+  "publishConfig": {
+    "access": "public"
+  },
   "bugs": {
     "url": "https://github.com/aihxp/sxmc/issues"
   },
@@ -20,10 +23,12 @@
   "files": [
     "bin",
     "scripts",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "postinstall": "node ./scripts/install.mjs"
+    "postinstall": "node ./scripts/install.mjs",
+    "test": "node --check ./bin/sxmc.js && node ./scripts/install.mjs"
   },
   "keywords": [
     "ai",

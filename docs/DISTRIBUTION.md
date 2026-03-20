@@ -4,11 +4,11 @@
 
 - crates.io: `cargo install sxmc`
 - GitHub Releases: prebuilt archives per target
+- npm wrapper: thin installer for prebuilt GitHub Release binaries
+- Homebrew formula: source-build formula intended for a tap
 
-This repo also includes scaffolding for additional channels.
-
-Those channels are scaffolded here, but not yet treated as the primary install
-path. The Rust crate and GitHub Release assets remain canonical.
+The Rust crate and GitHub Release assets remain canonical. The npm wrapper and
+Homebrew formula are convenience distribution channels layered on top.
 
 Current repo alignment:
 
@@ -21,26 +21,33 @@ Current repo alignment:
 
 The npm wrapper lives in [`packaging/npm`](../packaging/npm).
 
-It is intentionally thin:
+It is intentionally thin and now publish-ready:
 
 - the package installs a small launcher script
 - `postinstall` downloads the matching GitHub Release binary for the platform
+- the installer verifies the matching `.sha256` asset before unpacking
 - the launcher forwards all arguments to the native `sxmc` binary
 
-Planned publish target:
+Publish target:
 
 ```bash
 npm publish ./packaging/npm --access public
 ```
 
 Before publishing, verify that the matching GitHub Release assets already exist
-for the wrapper version. The current in-repo wrapper is aligned to `v0.1.2`.
+for the wrapper version, including the checksum files. The current in-repo
+wrapper is aligned to `v0.1.2`.
 
 Before publishing, keep the npm package version aligned with:
 
 - `Cargo.toml`
 - the Git tag
 - the GitHub Release asset names
+
+Useful npm-specific knobs:
+
+- `SXMC_NPM_SKIP_DOWNLOAD=1` skips the postinstall download for local development
+- `SXMC_NPM_DOWNLOAD_BASE=https://...` points the wrapper at a different release mirror
 
 ## Homebrew Formula
 
@@ -62,6 +69,8 @@ If you promote the formula into a real tap, update the tarball URL and `sha256`
 for each released version. The in-repo formula is currently pinned to the
 `v0.1.2` source archive.
 
+Tap-specific guidance lives in [`packaging/homebrew/README.md`](../packaging/homebrew/README.md).
+
 ## Release Asset Naming
 
 Current GitHub Release assets use this pattern:
@@ -78,3 +87,5 @@ Examples:
 - `sxmc-v0.1.2-x86_64-pc-windows-msvc.zip`
 
 Those names are what the npm wrapper expects when downloading binaries.
+The wrapper also expects matching checksum files with the same name plus
+`.sha256`.

@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,10 +17,12 @@ if (process.env.SXMC_NPM_SKIP_DOWNLOAD === "1") {
 const target = resolveTarget();
 const releaseTag = `v${version}`;
 const archiveName = `sxmc-${releaseTag}-${target.target}.${target.archiveExt}`;
+const checksumName = `${archiveName}.sha256`;
 const downloadBase =
   process.env.SXMC_NPM_DOWNLOAD_BASE ??
   `https://github.com/aihxp/sxmc/releases/download/${releaseTag}`;
 const url = `${downloadBase}/${archiveName}`;
+const checksumUrl = `${downloadBase}/${checksumName}`;
 
 const vendorDir = path.join(packageDir, "vendor");
 const tempDir = mkdtempSync(path.join(tmpdir(), "sxmc-npm-"));
@@ -42,6 +45,7 @@ try {
 
   const buffer = Buffer.from(await response.arrayBuffer());
   await writeFile(archivePath, buffer);
+  await verifyArchive(buffer, checksumUrl, checksumName);
 
   if (target.archiveExt === "zip") {
     execFileSync(
@@ -89,6 +93,30 @@ function resolveTarget() {
   }
 
   throw new Error(
-    `Unsupported platform for prebuilt sxmc binaries: ${process.platform}/${process.arch}`,
+    `Unsupported platform for prebuilt sxmc binaries: ${process.platform}/${process.arch}. Use cargo install sxmc or build from source instead.`,
   );
+}
+
+async function verifyArchive(buffer, checksumUrl, checksumName) {
+  const response = await fetch(checksumUrl, {
+    headers: {
+      "User-Agent": "@aihxp/sxmc npm installer",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download ${checksumName} (${response.status} ${response.statusText})`,
+    );
+  }
+
+  const checksumText = (await response.text()).trim();
+  const expected = checksumText.split(/\s+/)[0]?.toLowerCase();
+  const actual = createHash("sha256").update(buffer).digest("hex");
+
+  if (!expected || expected !== actual) {
+    throw new Error(
+      `Checksum mismatch for ${checksumName}: expected ${expected ?? "missing"}, got ${actual}`,
+    );
+  }
 }

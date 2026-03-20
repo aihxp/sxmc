@@ -5,6 +5,8 @@
 `sxmc` is distributed as:
 - a Rust crate source package
 - prebuilt GitHub Release binaries for macOS, Linux, and Windows
+- an npm wrapper that downloads release binaries
+- a Homebrew formula intended for a tap
 
 The repository is set up so that tag pushes produce release archives
 automatically.
@@ -24,6 +26,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo package
 bash scripts/smoke_test_clients.sh target/debug/sxmc tests/fixtures
+node --check packaging/npm/bin/sxmc.js
+SXMC_NPM_SKIP_DOWNLOAD=1 node packaging/npm/scripts/install.mjs
+ruby -c packaging/homebrew/sxmc.rb
 ```
 
 5. Smoke-test both MCP entrypoints:
@@ -93,7 +98,17 @@ Additional packaging scaffolds live in:
 
 - [`packaging/npm`](../packaging/npm)
 - [`packaging/homebrew/sxmc.rb`](../packaging/homebrew/sxmc.rb)
+- [`packaging/homebrew/README.md`](../packaging/homebrew/README.md)
 - [`docs/DISTRIBUTION.md`](DISTRIBUTION.md)
+
+If you publish the npm wrapper for a release:
+
+```bash
+npm publish ./packaging/npm --access public
+```
+
+If you maintain a Homebrew tap, update the tap formula after the release tag and
+source tarball are available.
 
 Until then, users can install from Git:
 
