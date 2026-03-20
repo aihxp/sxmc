@@ -17,6 +17,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - docs now separate benchmark timing claims from compatibility and smoke validation
 - release metadata and package docs now align to `0.1.6`
 
+## [0.1.7] - 2026-03-20
+
+### Added
+
+- explicit product contract doc for supported, graceful, and out-of-scope behavior
+- release certification script for local startup, bridge, package, and wrapper checks
+- real-world MCP smoke script for named official MCP servers
+
+### Fixed
+
+- zero-argument MCP tool calls now send `{}` by default for stricter servers
+
+### Changed
+
+- compatibility docs now record named external MCP servers, not just client categories
+- release metadata and package docs now align to `0.1.7`
+
 ## [0.1.5] - 2026-03-20
 
 ### Added
@@ -129,4 +146,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 [0.1.4]: https://github.com/aihxp/sxmc/compare/v0.1.3...v0.1.4
 [0.1.5]: https://github.com/aihxp/sxmc/compare/v0.1.4...v0.1.5
 [0.1.6]: https://github.com/aihxp/sxmc/compare/v0.1.5...v0.1.6
+[0.1.7]: https://github.com/aihxp/sxmc/compare/v0.1.6...v0.1.7
 [0.1.0]: https://github.com/aihxp/sxmc/releases/tag/v0.1.0

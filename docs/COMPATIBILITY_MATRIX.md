@@ -9,7 +9,7 @@ It is not a performance benchmark; keep timing interpretation in
 
 ## Current Validation Snapshot
 
-Validated against: `sxmc 0.1.6`  
+Validated against: `sxmc 0.1.7`  
 Validation date: `2026-03-20`
 
 | Client / consumer | Local stdio | Remote HTTP MCP | Validation method | Status | Notes |
