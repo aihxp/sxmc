@@ -150,10 +150,16 @@ fn parse_command_spec(command: &str) -> Result<Vec<String>> {
     }
 
     #[cfg(windows)]
-    if let Some(parts) = parse_windows_command_spec(trimmed) {
-        return Ok(parts);
+    {
+        if let Some(parts) = parse_windows_command_spec(trimmed) {
+            return Ok(parts);
+        }
+        // Fallback to simple whitespace splitting on Windows to preserve backslashes
+        // (shlex uses POSIX rules which treat backslashes as escape characters)
+        return Ok(trimmed.split_whitespace().map(str::to_string).collect());
     }
 
+    #[cfg(not(windows))]
     shlex::split(trimmed).ok_or_else(|| {
         SxmcError::Other(
             "Invalid stdio command string. Use shell-style quoting or a JSON array command spec."

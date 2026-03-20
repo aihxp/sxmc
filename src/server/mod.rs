@@ -155,21 +155,16 @@ async fn health_handler(info: Arc<HttpServerInfo>) -> Json<serde_json::Value> {
 }
 
 fn summarize_paths(paths: &[PathBuf]) -> SkillInventorySummary {
-    let mut summary = SkillInventorySummary::default();
-    let Ok(skill_dirs) = discovery::discover_skills(paths) else {
-        return summary;
+    let Ok(server) = build_server(paths) else {
+        return SkillInventorySummary::default();
     };
 
-    for dir in &skill_dirs {
-        let source = dir.parent().and_then(|p| p.to_str()).unwrap_or("unknown");
-        if let Ok(skill) = parser::parse_skill(dir, source) {
-            summary.skill_count += 1;
-            summary.tool_count += skill.scripts.len();
-            summary.resource_count += skill.references.len();
-        }
+    let skills = server.skills();
+    SkillInventorySummary {
+        skill_count: skills.len(),
+        tool_count: skills.iter().map(|s| s.scripts.len()).sum(),
+        resource_count: skills.iter().map(|s| s.references.len()).sum(),
     }
-
-    summary
 }
 
 /// Build a SkillsServer from skill search paths.
