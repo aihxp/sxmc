@@ -48,6 +48,14 @@ The GitHub Actions release workflow will build archives for:
 - `x86_64-pc-windows-msvc`
 
 The workflow also publishes matching `.sha256` files for each archive.
+Current runner mapping in `.github/workflows/release.yml` is:
+- `ubuntu-latest` -> `x86_64-unknown-linux-gnu`
+- `macos-15-intel` -> `x86_64-apple-darwin`
+- `macos-14` -> `aarch64-apple-darwin`
+- `windows-latest` -> `x86_64-pc-windows-msvc`
+
+If GitHub retires a hosted runner label again, update the matrix before cutting
+the next release tag.
 
 ## Publish to crates.io
 
