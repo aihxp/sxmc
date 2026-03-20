@@ -129,7 +129,7 @@ sxmc stdio "npx -y <package> [args…]" --list
 
 Some npm MCP servers validate tool arguments as a **JSON object**. With **sxmc**’s `key=value` CLI parsing, **no arguments** after the tool name means the client may **omit** the arguments object entirely, which surfaces as **input validation** errors from the server (e.g. *expected object, received undefined*) even though **exit code stays 0**.
 
-**Workaround (manual tests):** pass a disposable empty object so an object is always sent:
+**Workaround used in the v0.1.6 manual run:** pass a disposable empty object so an object is always sent:
 
 ```bash
 sxmc stdio "npx -y @modelcontextprotocol/server-memory" read_graph _={} --pretty
@@ -137,6 +137,9 @@ sxmc stdio "npx -y @modelcontextprotocol/server-filesystem /tmp" list_allowed_di
 ```
 
 (`_` is ignored by the server schema; only `{}` matters.)
+
+**Follow-up:** `master` now sends `{}` for zero-argument tool calls by default, so
+strict object validators no longer need this workaround in the CLI.
 
 ### 2.5 “Dialog” / multi-step use on **promptless** MCP servers
 
@@ -173,7 +176,7 @@ sxmc stdio "npx -y @modelcontextprotocol/server-filesystem /tmp" list_allowed_di
 1. ~~**MCP client `list`:** If `list_prompts` returns **`-32601`**, treat as **“no prompts”** and exit **0**~~ — **Done in v0.1.5** (optional-surface handling + advertised-capability skip).
 2. **Docs:** Call out that **`@modelcontextprotocol/server-everything`** is the easiest **known-good** server for full **tools + prompts + resources** demos.
 3. **Docs:** Link to npm scope **`@modelcontextprotocol/`** package list; **`server-fetch`** name may be wrong or unpublished.
-4. **Product:** For tools that declare **no parameters**, consider always sending **`{}`** as arguments when the CLI passes none, to match strict Zod/json-schema validators on popular npm servers.
+4. ~~**Product:** For tools that declare **no parameters**, consider always sending **`{}`** as arguments when the CLI passes none, to match strict Zod/json-schema validators on popular npm servers.~~ — **Done on `master`**.
 
 ---
 

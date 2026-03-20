@@ -5,6 +5,7 @@ use rmcp::transport::streamable_http_client::{
 };
 use rmcp::{RoleClient, ServiceExt};
 
+use crate::client::build_call_tool_params;
 use crate::error::{Result, SxmcError};
 
 /// A client connected to an MCP server over HTTP (streamable HTTP transport).
@@ -56,10 +57,7 @@ impl HttpClient {
         name: &str,
         arguments: serde_json::Map<String, serde_json::Value>,
     ) -> Result<CallToolResult> {
-        let mut params = CallToolRequestParams::new(name.to_string());
-        if !arguments.is_empty() {
-            params.arguments = Some(arguments);
-        }
+        let params = build_call_tool_params(name, arguments);
         let result = self
             .service
             .call_tool(params)

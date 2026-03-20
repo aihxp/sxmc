@@ -6,6 +6,7 @@ use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt};
 use tokio::process::Command;
 
+use crate::client::build_call_tool_params;
 use crate::error::{Result, SxmcError};
 
 /// A client connected to an MCP server over stdio.
@@ -63,10 +64,7 @@ impl StdioClient {
         name: &str,
         arguments: serde_json::Map<String, serde_json::Value>,
     ) -> Result<CallToolResult> {
-        let mut params = CallToolRequestParams::new(name.to_string());
-        if !arguments.is_empty() {
-            params.arguments = Some(arguments);
-        }
+        let params = build_call_tool_params(name, arguments);
 
         let result = self
             .service
