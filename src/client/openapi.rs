@@ -66,7 +66,7 @@ impl OpenApiSpec {
             .unwrap_or("API")
             .to_string();
 
-        let base_url = extract_base_url(&spec);
+        let base_url = extract_base_url(&spec, source);
         let operations = extract_operations(&spec);
 
         let mut header_map = reqwest::header::HeaderMap::new();
@@ -281,10 +281,22 @@ async fn fetch_spec(url: &str, auth_headers: &[(String, String)]) -> Result<Stri
 }
 
 /// Extract the base URL from an OpenAPI spec.
-fn extract_base_url(spec: &Value) -> String {
+/// When `source` is an HTTP URL, relative server URLs are resolved against it.
+fn extract_base_url(spec: &Value, source: &str) -> String {
     // OpenAPI 3.x: servers[0].url
-    if let Some(url) = spec.pointer("/servers/0/url").and_then(|v| v.as_str()) {
-        return url.to_string();
+    if let Some(server_url) = spec.pointer("/servers/0/url").and_then(|v| v.as_str()) {
+        if server_url.starts_with("http://") || server_url.starts_with("https://") {
+            return server_url.to_string();
+        }
+        // Relative server URL — resolve against the spec source URL
+        if source.starts_with("http://") || source.starts_with("https://") {
+            if let Ok(base) = url::Url::parse(source) {
+                if let Ok(resolved) = base.join(server_url) {
+                    return resolved.as_str().trim_end_matches('/').to_string();
+                }
+            }
+        }
+        return server_url.to_string();
     }
 
     // Swagger 2.x: host + basePath
@@ -506,7 +518,22 @@ mod tests {
             "openapi": "3.0.0",
             "servers": [{"url": "https://api.example.com/v1"}]
         });
-        assert_eq!(extract_base_url(&spec), "https://api.example.com/v1");
+        assert_eq!(
+            extract_base_url(&spec, "https://api.example.com/openapi.json"),
+            "https://api.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn test_extract_base_url_relative_server() {
+        let spec: Value = serde_json::json!({
+            "openapi": "3.0.0",
+            "servers": [{"url": "/api/v3"}]
+        });
+        assert_eq!(
+            extract_base_url(&spec, "https://petstore3.swagger.io/api/v3/openapi.json"),
+            "https://petstore3.swagger.io/api/v3"
+        );
     }
 
     #[test]
@@ -517,7 +544,10 @@ mod tests {
             "basePath": "/v2",
             "schemes": ["https"]
         });
-        assert_eq!(extract_base_url(&spec), "https://petstore.swagger.io/v2");
+        assert_eq!(
+            extract_base_url(&spec, "https://petstore.swagger.io/v2/swagger.json"),
+            "https://petstore.swagger.io/v2"
+        );
     }
 
     #[test]

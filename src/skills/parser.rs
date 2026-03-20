@@ -30,6 +30,7 @@ pub fn split_frontmatter(content: &str) -> Result<(String, String)> {
 
 /// Parse a SKILL.md file into a Skill struct.
 pub fn parse_skill(skill_dir: &Path, source: &str) -> Result<Skill> {
+    let skill_dir = skill_dir.canonicalize().unwrap_or_else(|_| skill_dir.to_path_buf());
     let skill_md = skill_dir.join("SKILL.md");
     let content = std::fs::read_to_string(&skill_md)?;
 
@@ -43,18 +44,14 @@ pub fn parse_skill(skill_dir: &Path, source: &str) -> Result<Skill> {
         serde_yaml::from_str(&yaml_str)?
     };
 
-    // Resolve ${CLAUDE_SKILL_DIR} in body
     let body = body.replace("${CLAUDE_SKILL_DIR}", skill_dir.to_str().unwrap_or(""));
 
-    // Scan for scripts
-    let scripts = scan_scripts(skill_dir)?;
-
-    // Scan for references
-    let references = scan_references(skill_dir, &frontmatter.name)?;
+    let scripts = scan_scripts(&skill_dir)?;
+    let references = scan_references(&skill_dir, &frontmatter.name)?;
 
     Ok(Skill {
         name: frontmatter.name.clone(),
-        base_dir: skill_dir.to_path_buf(),
+        base_dir: skill_dir,
         frontmatter,
         body,
         scripts,

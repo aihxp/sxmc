@@ -12,8 +12,13 @@ pub fn default_paths() -> Vec<PathBuf> {
         paths.push(home.join(".claude").join("skills"));
     }
 
-    // Project skills (relative to cwd)
-    paths.push(PathBuf::from(".claude").join("skills"));
+    // Project skills (relative to cwd, canonicalized to absolute)
+    let project_path = PathBuf::from(".claude").join("skills");
+    if let Ok(abs) = project_path.canonicalize() {
+        paths.push(abs);
+    } else {
+        paths.push(project_path);
+    }
 
     paths
 }
