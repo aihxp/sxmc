@@ -37,8 +37,8 @@ sxmc serve --transport http --host 127.0.0.1 --port 8000 \
 ## Create a Release Tag
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 The GitHub Actions release workflow will build archives for:
@@ -63,6 +63,9 @@ After publishing, users can install with:
 ```bash
 cargo install sxmc
 ```
+
+docs.rs should rebuild automatically after the new crate version becomes
+available.
 
 ## Optional Distribution Channels
 

@@ -48,12 +48,6 @@ The equivalent persistent config shape is:
 url = "http://127.0.0.1:8000/mcp"
 ```
 
-To confirm it is registered:
-
-```bash
-codex mcp list
-```
-
 If you need environment variables for skill execution, add them when registering:
 
 ```bash
@@ -199,3 +193,6 @@ Additional release-channel notes are in:
 
 - [`docs/SMOKE_TESTS.md`](SMOKE_TESTS.md)
 - [`docs/DISTRIBUTION.md`](DISTRIBUTION.md)
+
+If you want a single repeatable pre-release check, run the smoke script from
+[`docs/SMOKE_TESTS.md`](SMOKE_TESTS.md) before tagging.

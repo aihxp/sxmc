@@ -16,7 +16,12 @@ Install from crates.io:
 cargo install sxmc
 ```
 
-Prebuilt binaries are also intended to be distributed through GitHub Releases.
+Other channels:
+
+- GitHub Releases: prebuilt archives plus `.sha256` files
+- npm wrapper scaffold: [`packaging/npm`](packaging/npm)
+- Homebrew formula scaffold: [`packaging/homebrew/sxmc.rb`](packaging/homebrew/sxmc.rb)
+
 Or build from source:
 
 ```bash
@@ -29,7 +34,8 @@ cargo build --release
 Additional setup and client-specific configuration examples are in
 [`docs/CLIENTS.md`](docs/CLIENTS.md). Release and publishing steps are in
 [`docs/RELEASING.md`](docs/RELEASING.md). Distribution-channel notes are in
-[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md), and smoke checks are in
+[`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md).
 
 ## Quick Start
 
@@ -50,6 +56,8 @@ sxmc serve --transport http --host 0.0.0.0 --port 8000 \
 sxmc serve --transport http --host 0.0.0.0 --port 8000 \
   --bearer-token env:SXMC_MCP_TOKEN
 curl http://127.0.0.1:8000/healthz
+sxmc http http://127.0.0.1:8000/mcp \
+  --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" --list
 ```
 
 Add to any MCP client config:
