@@ -21,14 +21,14 @@ automatically.
 4. Run:
 
 ```bash
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo package
-bash scripts/smoke_test_clients.sh target/debug/sxmc tests/fixtures
-node --check packaging/npm/bin/sxmc.js
-SXMC_NPM_SKIP_DOWNLOAD=1 node packaging/npm/scripts/install.mjs
-ruby -c packaging/homebrew/sxmc.rb
+bash scripts/certify_release.sh target/debug/sxmc tests/fixtures
+```
+
+To include the optional external MCP certification loop from the real-world
+compatibility report:
+
+```bash
+SXMC_CERTIFY_EXTERNAL=1 bash scripts/certify_release.sh target/debug/sxmc tests/fixtures
 ```
 
 5. Smoke-test both MCP entrypoints:
@@ -50,6 +50,8 @@ For the `0.1.2` patch line, keep these regressions covered before tagging:
   the public Petstore v3 spec at
   `https://petstore3.swagger.io/api/v3/openapi.json` plus
   `findPetsByStatus status=available` is the preferred smoke target
+- zero-argument tool calls against strict MCP servers should send `{}` by
+  default, without requiring the old `_={}` workaround
 
 ## Create a Release Tag
 

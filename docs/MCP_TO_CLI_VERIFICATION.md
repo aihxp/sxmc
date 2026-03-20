@@ -22,6 +22,9 @@ So the precise contract is:
 - **MCP discovery surface:** tools, prompts, resources
 - **MCP invocation surface:** tools, prompts, resources
 
+For the explicit product boundary, including what is not yet supported by the
+CLI bridge, see [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md).
+
 ## Summary
 
 | Transport | Discovery | Invocation | Status | Evidence |

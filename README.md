@@ -83,6 +83,7 @@ Release and publishing steps are in
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md), smoke checks are in
 [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md), performance and token notes are in
 [`docs/VALUE_AND_BENCHMARK_FINDINGS.md`](docs/VALUE_AND_BENCHMARK_FINDINGS.md),
+the explicit support contract is in [`docs/PRODUCT_CONTRACT.md`](docs/PRODUCT_CONTRACT.md),
 and launch copy is in
 [`docs/LAUNCH.md`](docs/LAUNCH.md).
 
@@ -213,6 +214,9 @@ Hosted MCP servers work the same way over HTTP:
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --list
+
+For a captured end-to-end sample of this exact `skills -> MCP -> CLI` path, see
+[`docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md`](docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md).
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --describe --pretty

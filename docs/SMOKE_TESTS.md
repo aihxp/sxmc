@@ -10,6 +10,8 @@ they validate the transport patterns those clients rely on:
 
 For the release-by-release validation ledger, pair this file with
 [`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md).
+For the explicit support boundary, pair it with
+[`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md).
 
 These checks are intentionally separate from the Linux timing harness in
 [`VALUE_AND_BENCHMARK_FINDINGS.md`](VALUE_AND_BENCHMARK_FINDINGS.md). Smoke
@@ -49,6 +51,26 @@ That script verifies:
 - `sxmc serve --transport http` is reachable at `/mcp`
 - `sxmc serve --bearer-token ...` works with `sxmc http --auth-header ...`
 - `/healthz` responds for remote deployments
+
+## Optional Real-World MCP Smoke
+
+When Node and network access are available, run:
+
+```bash
+bash scripts/smoke_real_world_mcps.sh target/debug/sxmc
+```
+
+That script exercises named official MCP servers that showed up in the
+real-world validation notes:
+
+- `@modelcontextprotocol/server-everything`
+- `@modelcontextprotocol/server-memory`
+- `@modelcontextprotocol/server-filesystem`
+- `@modelcontextprotocol/server-sequential-thinking`
+- `@modelcontextprotocol/server-github`
+
+It also covers the zero-argument tool-call interoperability fix by invoking
+strict servers without the old manual `_={}` workaround.
 
 ## Manual Client Checks
 
@@ -97,6 +119,7 @@ After each release:
 
 1. Run the startup sanity check.
 2. Run the automated smoke script.
-3. Re-check the client config examples under [`../examples/clients`](../examples/clients).
-4. Update [`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md) with the release
+3. Optionally run the real-world MCP smoke script if Node/network are available.
+4. Re-check the client config examples under [`../examples/clients`](../examples/clients).
+5. Update [`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md) with the release
    version and validation date.

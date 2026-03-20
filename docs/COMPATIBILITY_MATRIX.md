@@ -20,6 +20,19 @@ Validation date: `2026-03-20`
 | Claude Code | Yes | Yes | config example + transport smoke checks | Validated | Use stdio locally; use `/mcp` for remote hosting |
 | Generic hosted HTTP MCP consumer | No | Yes | `/mcp` + `/healthz` + bearer/header smoke checks | Validated | Stand-in for remote MCP UIs and connector-style consumers |
 
+## Named MCP Server Snapshot
+
+These rows capture real external MCP server validation separate from proprietary
+client setup examples.
+
+| Server | Tool list | Prompts/resources | Zero-arg tool call | Stateful multi-step via repeated CLI calls | Status | Notes |
+|--------|-----------|-------------------|--------------------|--------------------------------------------|--------|-------|
+| `@modelcontextprotocol/server-everything` | Yes | Yes | N/A | N/A | Validated | Best known-good demo server for full surfaces |
+| `@modelcontextprotocol/server-memory` | Yes | Skipped when not advertised | Yes | No | Validated | Promptless server; repeated CLI calls start fresh state |
+| `@modelcontextprotocol/server-filesystem /tmp` | Yes | Skipped when not advertised | Yes | No | Validated | `list_allowed_directories` is the key zero-arg check |
+| `@modelcontextprotocol/server-sequential-thinking` | Yes | Skipped when not advertised | N/A | No | Validated | One-shot tool calls work; thought history does not persist across processes |
+| `@modelcontextprotocol/server-github` | Yes | Skipped when not advertised | N/A | N/A | Validated | `--list` works without `GITHUB_TOKEN` for metadata discovery |
+
 ## What "Validated" Means Here
 
 For a client row to remain marked as validated:
@@ -63,6 +76,12 @@ cargo install sxmc --force
    - validated release version
    - validation date
    - status / notes for any regressions or caveats
+
+5. If Node and network access are available, rerun:
+
+```bash
+SXMC_CERTIFY_EXTERNAL=1 bash scripts/certify_release.sh target/debug/sxmc tests/fixtures
+```
 
 ## Known Scope Limits
 

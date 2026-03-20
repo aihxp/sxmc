@@ -6,6 +6,7 @@ Additional documentation for sxmc developers and maintainers.
 |----------|-------------|
 | [CLIENTS.md](CLIENTS.md) | Client setup for Codex, Cursor, Gemini CLI, Claude Code, and compatibility matrix |
 | [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) | Dated compatibility ledger for supported clients and remote MCP consumers |
+| [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md) | Explicit support boundary: what `sxmc` guarantees, degrades gracefully, or leaves out of scope |
 | [CONNECTION_EXAMPLES.md](CONNECTION_EXAMPLES.md) | Copy-pasteable stdio, HTTP, and nested bridge examples |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Hosted `/mcp` deployment, auth, health checks, and operations notes |
 | [RELEASING.md](RELEASING.md) | Release process, version bumping, and crates.io publishing |
