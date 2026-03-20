@@ -249,7 +249,7 @@ async fn cmd_skills_run(paths: &[PathBuf], name: &str, arguments: &[String]) -> 
                 let args_str = arguments.join(" ");
                 let mut body = skill.body.clone();
 
-                for (i, arg) in arguments.iter().enumerate() {
+                for (i, arg) in arguments.iter().enumerate().rev() {
                     body = body.replace(&format!("$ARGUMENTS[{}]", i), arg);
                     body = body.replace(&format!("${}", i), arg);
                 }

@@ -49,7 +49,7 @@ impl SkillsServer {
     }
 
     fn make_tool_name(skill_name: &str, script_name: &str) -> String {
-        let stem = script_name.rsplit('.').last().unwrap_or(script_name);
+        let stem = script_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(script_name);
         format!(
             "{}__{}",
             skill_name.replace('-', "_"),
