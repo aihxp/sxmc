@@ -3,6 +3,9 @@
 `sxmc` is designed first for stdio-based MCP clients, but it can also run as a
 remote streamable HTTP MCP server at `/mcp`.
 
+For the dated validation ledger, see
+[`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md).
+
 For remote deployments, prefer:
 
 ```bash
@@ -20,6 +23,8 @@ sxmc serve --transport http --host 0.0.0.0 --port 8000 \
 | Gemini CLI | Yes | Yes | Supported |
 | Claude Code and other local coding agents | Yes | Yes | Supported |
 | ChatGPT Apps / Claude.ai connectors | No local stdio | Yes | Use the remote `/mcp` endpoint when those products accept remote MCP URLs |
+
+Copy-pasteable config files also live in [`../examples/clients`](../examples/clients).
 
 ## Codex
 

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sxmc": {
+      "type": "stdio",
+      "command": "sxmc",
+      "args": ["serve", "--paths", "/absolute/path/to/skills"]
+    },
+    "sxmc-remote": {
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}

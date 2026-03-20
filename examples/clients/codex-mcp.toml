@@ -1,0 +1,6 @@
+[mcp_servers.sxmc]
+command = "sxmc"
+args = ["serve", "--paths", "/absolute/path/to/skills"]
+
+[mcp_servers.sxmc_remote]
+url = "http://127.0.0.1:8000/mcp"

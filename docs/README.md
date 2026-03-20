@@ -5,6 +5,9 @@ Additional documentation for sxmc developers and maintainers.
 | Document | Description |
 |----------|-------------|
 | [CLIENTS.md](CLIENTS.md) | Client setup for Codex, Cursor, Gemini CLI, Claude Code, and compatibility matrix |
+| [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) | Dated compatibility ledger for supported clients and remote MCP consumers |
+| [CONNECTION_EXAMPLES.md](CONNECTION_EXAMPLES.md) | Copy-pasteable stdio, HTTP, and nested bridge examples |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Hosted `/mcp` deployment, auth, health checks, and operations notes |
 | [RELEASING.md](RELEASING.md) | Release process, version bumping, and crates.io publishing |
 | [DISTRIBUTION.md](DISTRIBUTION.md) | Distribution channels: npm wrapper, Homebrew formula, asset naming |
 | [SMOKE_TESTS.md](SMOKE_TESTS.md) | Client smoke test procedures (automated and manual) |

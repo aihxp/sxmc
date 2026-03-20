@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-03-20
+
+### Added
+
+- `sxmc serve --watch` for polling-based skill reloads during local development
+- benchmark and launch docs for the current patch line, including reproducible CLI benchmark guidance
+
+### Fixed
+
+- Windows stdio command parsing fallback
+- redundant skill discovery during CLI bridge flows
+
+### Changed
+
+- release metadata and package docs now align to `0.1.4`
+- benchmark findings now explicitly call out that `--watch` is outside the default one-shot benchmark path
+
 ## [0.1.3] - 2026-03-20
 
 ### Added
@@ -78,4 +95,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 [0.1.1]: https://github.com/aihxp/sxmc/compare/v0.1.0...v0.1.1
 [0.1.2]: https://github.com/aihxp/sxmc/compare/v0.1.1...v0.1.2
 [0.1.3]: https://github.com/aihxp/sxmc/compare/v0.1.2...v0.1.3
+[0.1.4]: https://github.com/aihxp/sxmc/compare/v0.1.3...v0.1.4
 [0.1.0]: https://github.com/aihxp/sxmc/releases/tag/v0.1.0

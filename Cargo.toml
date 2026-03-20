@@ -1,6 +1,6 @@
 [package]
 name = "sxmc"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Turn skills into MCP servers, MCP servers into CLI commands, and any OpenAPI/GraphQL API into a CLI — one Rust binary"
 license = "MIT"

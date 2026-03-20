@@ -10,12 +10,19 @@
 The Rust crate and GitHub Release assets remain canonical. The npm wrapper and
 Homebrew formula are convenience distribution channels layered on top.
 
+Current channel status:
+
+- crates.io: published and canonical
+- GitHub Releases: published and canonical
+- npm wrapper: packaging-ready, publish when you want a JS-native install path
+- Homebrew formula: ready to promote into a real tap
+
 Current repo alignment:
 
-- crate version: `0.1.3`
-- npm wrapper metadata: `0.1.3`
+- crate version: `0.1.4`
+- npm wrapper metadata: `0.1.4`
 - Homebrew formula source tarball: current release tag
-- GitHub Release binaries: `v0.1.3`
+- GitHub Release binaries: `v0.1.4`
 
 ## npm Wrapper
 
@@ -36,7 +43,7 @@ npm publish ./packaging/npm --access public
 
 Before publishing, verify that the matching GitHub Release assets already exist
 for the wrapper version, including the checksum files. The current in-repo
-wrapper is aligned to `v0.1.3`.
+wrapper is aligned to `v0.1.4`.
 
 Before publishing, keep the npm package version aligned with:
 
@@ -82,9 +89,9 @@ sxmc-vX.Y.Z-<target>.zip
 
 Examples:
 
-- `sxmc-v0.1.3-x86_64-unknown-linux-gnu.tar.gz`
-- `sxmc-v0.1.3-aarch64-apple-darwin.tar.gz`
-- `sxmc-v0.1.3-x86_64-pc-windows-msvc.zip`
+- `sxmc-v0.1.4-x86_64-unknown-linux-gnu.tar.gz`
+- `sxmc-v0.1.4-aarch64-apple-darwin.tar.gz`
+- `sxmc-v0.1.4-x86_64-pc-windows-msvc.zip`
 
 Those names are what the npm wrapper expects when downloading binaries.
 The wrapper also expects matching checksum files with the same name plus

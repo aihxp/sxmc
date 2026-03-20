@@ -59,7 +59,7 @@ cargo install sxmc
 Other channels:
 
 - GitHub Releases: prebuilt archives plus `.sha256` files
-- npm wrapper metadata aligned to `0.1.3`: [`packaging/npm`](packaging/npm)
+- npm wrapper metadata aligned to `0.1.4`: [`packaging/npm`](packaging/npm)
   The wrapper downloads and verifies release binaries during `postinstall`.
 - Homebrew formula pinned to the current release tag: [`packaging/homebrew/sxmc.rb`](packaging/homebrew/sxmc.rb)
   Tap guidance: [`packaging/homebrew/README.md`](packaging/homebrew/README.md)
@@ -74,7 +74,11 @@ cargo build --release
 ```
 
 Additional setup and client-specific configuration examples are in
-[`docs/CLIENTS.md`](docs/CLIENTS.md). Release and publishing steps are in
+[`docs/CLIENTS.md`](docs/CLIENTS.md). The maintained compatibility ledger is in
+[`docs/COMPATIBILITY_MATRIX.md`](docs/COMPATIBILITY_MATRIX.md), hosted deployment
+guidance is in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md), and connection
+examples are in [`docs/CONNECTION_EXAMPLES.md`](docs/CONNECTION_EXAMPLES.md).
+Release and publishing steps are in
 [`docs/RELEASING.md`](docs/RELEASING.md). Distribution-channel notes are in
 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md), smoke checks are in
 [`docs/SMOKE_TESTS.md`](docs/SMOKE_TESTS.md), and launch copy is in
@@ -95,6 +99,9 @@ sxmc serve
 
 # Streamable HTTP MCP endpoint at http://127.0.0.1:8000/mcp
 sxmc serve --transport http --host 127.0.0.1 --port 8000
+
+# Development mode: reload skills when SKILL.md, scripts/, or references/ change
+sxmc serve --watch
 
 # Require auth headers for remote MCP access
 sxmc serve --transport http --host 0.0.0.0 --port 8000 \
@@ -146,6 +153,8 @@ This lets `sxmc` work well with local stdio-based MCP clients such as Codex,
 Cursor, Gemini CLI, and similar coding agents.
 It can also be hosted as a remote streamable HTTP MCP server for clients that
 consume HTTP MCP endpoints.
+The dated validation status for those clients lives in
+[`docs/COMPATIBILITY_MATRIX.md`](docs/COMPATIBILITY_MATRIX.md).
 
 ### Any MCP server as CLI
 
@@ -201,11 +210,15 @@ sxmc http http://127.0.0.1:8000/mcp \
 For hosted `/mcp` endpoints, prefer `--require-header` so remote access is not
 left open by default. For single-token hosted deployments, `--bearer-token` is
 usually the friendlier option.
+Hosted deployment guidance, reverse-proxy notes, and operational checks are in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 For `sxmc stdio`, you can now pass either shell-style quoting or a JSON-array
 command spec such as `["sxmc","serve","--paths","tests/fixtures"]`. For nested
 or project-local servers, `--cwd` gives you an explicit working directory when
 you do not want to rely on the caller’s current directory.
+For local skill development, `sxmc serve --watch` polls skill files once per
+second and reloads the in-memory server when it detects a change.
 
 ### Any API as CLI
 
@@ -362,6 +375,7 @@ remote streamable HTTP MCP endpoint at `/mcp`.
 - Supported now for remote MCP consumers too: streamable HTTP MCP at `/mcp`
 - Recommended for hosted remote MCP: `--bearer-token env:SXMC_MCP_TOKEN`
 - Health endpoint for hosted deployments: `/healthz`
+- Local development convenience: `sxmc serve --watch`
 
 See [`docs/CLIENTS.md`](docs/CLIENTS.md) for client-specific setup examples,
 the current compatibility matrix, and repeatable smoke-check commands.
@@ -372,7 +386,7 @@ the current compatibility matrix, and repeatable smoke-check commands.
 sxmc [subcommand] [options]
 
 SERVER:
-  serve [--paths ...] [--transport stdio|http|sse] [--host 127.0.0.1] [--port 8000] [--require-header K:V] [--bearer-token TOKEN]
+  serve [--paths ...] [--watch] [--transport stdio|http|sse] [--host 127.0.0.1] [--port 8000] [--require-header K:V] [--bearer-token TOKEN]
 
 SKILLS:
   skills list [--paths ...] [--json]

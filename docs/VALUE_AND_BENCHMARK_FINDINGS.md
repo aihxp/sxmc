@@ -29,6 +29,11 @@ those keys into a tabular layout that is easier for both humans and models to sc
 
 Latest captured numbers: **[BENCHMARK_RUN_v0.1.3.md](BENCHMARK_RUN_v0.1.3.md)** (**sxmc 0.1.3**, **5 runs**, **median ms**, `scripts/benchmark_cli.sh`).
 
+These timings reflect the default one-shot command paths. The optional
+development feature `sxmc serve --watch` is intentionally outside this table;
+it adds background polling for skill reloads, but does not change the default
+startup/bridge path that the benchmarks are describing.
+
 Environment: **Linux x86_64**. Petstore steps are **network-dominated**.
 
 | Scenario | Command / step | Median (ms) @ v0.1.3 | Notes |

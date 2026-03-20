@@ -8,6 +8,9 @@ they validate the transport patterns those clients rely on:
 - remote streamable HTTP MCP
 - bearer-protected remote MCP
 
+For the release-by-release validation ledger, pair this file with
+[`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md).
+
 ## Automated Smoke Script
 
 Run from the repo root:
@@ -64,3 +67,12 @@ sxmc serve --transport http --host 0.0.0.0 --port 8000 \
   --bearer-token env:SXMC_MCP_TOKEN \
   --paths /absolute/path/to/skills
 ```
+
+## Maintenance Pattern
+
+After each release:
+
+1. Run the automated smoke script.
+2. Re-check the client config examples under [`../examples/clients`](../examples/clients).
+3. Update [`COMPATIBILITY_MATRIX.md`](COMPATIBILITY_MATRIX.md) with the release
+   version and validation date.

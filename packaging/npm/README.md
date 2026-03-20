@@ -2,7 +2,7 @@
 
 This package is a thin npm wrapper around the native `sxmc` Rust binary.
 
-The wrapper metadata in this repo is aligned to **`0.1.3`** and expects the
+The wrapper metadata in this repo is aligned to **`0.1.4`** and expects the
 matching GitHub Release assets for that version to exist before publish.
 
 ## Install
@@ -43,4 +43,4 @@ sxmc serve
 - Set `SXMC_NPM_SKIP_DOWNLOAD=1` to skip the download during local development.
 - Set `SXMC_NPM_DOWNLOAD_BASE=https://...` to point the installer at a custom
   release mirror.
-- Current release tag alignment in-repo: **`v0.1.3`**
+- Current release tag alignment in-repo: **`v0.1.4`**

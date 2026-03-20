@@ -28,6 +28,10 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<PathBuf>>,
 
+        /// Watch skill files and reload the in-memory server on change
+        #[arg(long)]
+        watch: bool,
+
         /// Transport: stdio, http, or sse (alias for http)
         #[arg(long, default_value = "stdio")]
         transport: String,
@@ -431,6 +435,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Serve {
             paths,
+            watch,
             transport,
             port,
             host,
@@ -447,7 +452,7 @@ async fn main() -> anyhow::Result<()> {
                             "[sxmc] Warning: remote auth flags are ignored for stdio transport"
                         );
                     }
-                    server::serve_stdio(&search_paths).await?
+                    server::serve_stdio(&search_paths, watch).await?
                 }
                 "http" | "sse" => {
                     server::serve_http(
@@ -456,6 +461,7 @@ async fn main() -> anyhow::Result<()> {
                         port,
                         &required_headers,
                         bearer_token.as_deref(),
+                        watch,
                     )
                     .await?
                 }

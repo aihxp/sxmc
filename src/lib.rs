@@ -63,7 +63,7 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let paths = vec![PathBuf::from("./skills")];
-//!     sxmc::server::serve_stdio(&paths).await?;
+//!     sxmc::server::serve_stdio(&paths, false).await?;
 //!     Ok(())
 //! }
 //! ```
