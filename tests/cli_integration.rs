@@ -2,7 +2,6 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use std::net::TcpListener;
-use std::path::Path;
 use std::process::Command as ProcessCommand;
 use std::time::Duration;
 
@@ -22,24 +21,6 @@ fn pick_unused_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) {
-    fs::create_dir_all(dst).unwrap();
-
-    for entry in fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path);
-        } else {
-            fs::copy(&src_path, &dst_path).unwrap();
-            let perms = fs::metadata(&src_path).unwrap().permissions();
-            fs::set_permissions(&dst_path, perms).unwrap();
-        }
-    }
 }
 
 #[test]
@@ -340,14 +321,51 @@ fn test_stdio_hybrid_get_skill_related_file() {
 #[test]
 fn test_stdio_executes_project_local_skill_script_without_explicit_paths() {
     let temp = tempfile::tempdir().unwrap();
-    let skill_src = Path::new("tests/fixtures/skill-with-scripts");
     let skill_dst = temp
         .path()
         .join(".claude")
         .join("skills")
-        .join("skill-with-scripts");
+        .join("project-local-skill");
+    let scripts_dir = skill_dst.join("scripts");
 
-    copy_dir_recursive(skill_src, &skill_dst);
+    fs::create_dir_all(&scripts_dir).unwrap();
+    fs::write(
+        skill_dst.join("SKILL.md"),
+        "---\nname: project-local-skill\ndescription: Project-local regression skill\n---\nThis skill has tools available.\n",
+    )
+    .unwrap();
+
+    #[cfg(windows)]
+    let script_name = "hello.cmd";
+    #[cfg(not(windows))]
+    let script_name = "hello.sh";
+
+    let script_path = scripts_dir.join(script_name);
+
+    #[cfg(windows)]
+    fs::write(
+        &script_path,
+        "@echo off\r\necho Hello from script! Args: %*\r\n",
+    )
+    .unwrap();
+
+    #[cfg(not(windows))]
+    {
+        fs::write(
+            &script_path,
+            "#!/bin/sh\necho \"Hello from script! Args: $@\"\n",
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
 
     let inner = format!("{} serve", sxmc_bin_string());
 
@@ -356,7 +374,7 @@ fn test_stdio_executes_project_local_skill_script_without_explicit_paths() {
         .args([
             "stdio",
             &inner,
-            "skill_with_scripts__hello",
+            "project_local_skill__hello",
             "args=from-regression-test",
         ])
         .assert()
