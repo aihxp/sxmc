@@ -20,5 +20,6 @@ Additional documentation for sxmc developers and maintainers.
 | [REAL_WORLD_SKILLS_AND_MCP_REPORT.md](REAL_WORLD_SKILLS_AND_MCP_REPORT.md) | Five skills + five npm MCPs; promptless `--list`; multi-invocation / “dialog” notes (v0.1.6) |
 | [VALUE_AND_BENCHMARK_FINDINGS.md](VALUE_AND_BENCHMARK_FINDINGS.md) | Value proposition, benchmark scope, startup benchmark helper, token estimation guidance |
 | [MCP_TO_CLI_VERIFICATION.md](MCP_TO_CLI_VERIFICATION.md) | MCP → CLI (`stdio` / `http`) verification notes, bridge contract, and manual checks |
+| [MCP_AGENT_SNIPPETS.md](MCP_AGENT_SNIPPETS.md) | Agent-facing snippets and workflow guidance for low-token baked MCP usage |
 | [SKILLS_TO_MCP_TO_CLI_SAMPLES.md](SKILLS_TO_MCP_TO_CLI_SAMPLES.md) | Sample terminal output: skills→MCP→CLI vs `skills run` (nested `serve` + fixtures) |
 | [LAUNCH.md](LAUNCH.md) | Release notes template, pitch copy, and announcement drafts |

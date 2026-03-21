@@ -107,6 +107,14 @@ enum Commands {
         #[arg(long, value_name = "TOOL", conflicts_with = "describe")]
         describe_tool: Option<String>,
 
+        /// Structured output format for MCP describe output
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// Maximum items to show per listed MCP surface
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -165,6 +173,14 @@ enum Commands {
         #[arg(long, value_name = "TOOL", conflicts_with = "describe")]
         describe_tool: Option<String>,
 
+        /// Structured output format for MCP describe output
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// Maximum items to show per listed MCP surface
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -172,6 +188,12 @@ enum Commands {
         /// HTTP headers (Key:Value)
         #[arg(long = "auth-header", value_name = "K:V")]
         auth_headers: Vec<String>,
+    },
+
+    /// Use baked MCP connections in a token-efficient, mcp-cli-style workflow
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
     },
 
     /// Connect to any API (auto-detects OpenAPI or GraphQL)
@@ -304,6 +326,12 @@ enum Commands {
         env_vars: Vec<String>,
     },
 
+    /// Inspect structured sxmc artifacts
+    Inspect {
+        #[command(subcommand)]
+        action: InspectAction,
+    },
+
     /// Manage baked connection configs
     Bake {
         #[command(subcommand)]
@@ -369,6 +397,127 @@ enum BakeAction {
     },
     /// Remove a baked config
     Remove { name: String },
+}
+
+#[derive(Subcommand)]
+enum InspectAction {
+    /// Render a CLI surface profile from JSON
+    Profile {
+        /// Path to a JSON profile file
+        input: PathBuf,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format for the profile
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// List baked MCP servers (stdio/http bakes only)
+    Servers {
+        /// Pretty-print structured output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    /// List tools for a baked MCP server
+    Tools {
+        /// Baked MCP server name
+        server: String,
+
+        /// Search/filter tools by name or description
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Maximum items to show
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+    },
+    /// Search tools across baked MCP servers
+    Grep {
+        /// Search pattern
+        pattern: String,
+
+        /// Restrict search to one baked MCP server
+        #[arg(long)]
+        server: Option<String>,
+
+        /// Maximum matches to show
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+    },
+    /// List prompts for a baked MCP server
+    Prompts {
+        /// Baked MCP server name
+        server: String,
+
+        /// Maximum items to show
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+    },
+    /// List resources for a baked MCP server
+    Resources {
+        /// Baked MCP server name
+        server: String,
+
+        /// Maximum items to show
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
+    },
+    /// Show detailed schema/help for one tool as SERVER/TOOL
+    Info {
+        /// Target tool in SERVER/TOOL form
+        target: String,
+
+        /// Pretty-print structured output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    /// Call one tool as SERVER/TOOL with optional JSON object input
+    Call {
+        /// Target tool in SERVER/TOOL form
+        target: String,
+
+        /// JSON object payload, or '-' to read JSON from stdin
+        payload: Option<String>,
+
+        /// Pretty-print JSON-like tool output
+        #[arg(long)]
+        pretty: bool,
+    },
+    /// Read one resource as SERVER/RESOURCE_URI
+    Read {
+        /// Target resource in SERVER/RESOURCE_URI form
+        target: String,
+
+        /// Pretty-print structured output
+        #[arg(long)]
+        pretty: bool,
+    },
+    /// Fetch one prompt as SERVER/PROMPT with key=value arguments
+    Prompt {
+        /// Target prompt in SERVER/PROMPT form
+        target: String,
+
+        /// Prompt arguments as key=value pairs
+        args: Vec<String>,
+
+        /// Pretty-print structured output
+        #[arg(long)]
+        pretty: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -451,6 +600,185 @@ fn parse_headers(headers: &[String]) -> Result<Vec<(String, String)>> {
 
 fn parse_optional_secret(secret: Option<String>) -> Result<Option<String>> {
     secret.map(|value| resolve_secret(&value)).transpose()
+}
+
+enum ConnectedMcpClient {
+    Stdio(mcp_stdio::StdioClient),
+    Http(mcp_http::HttpClient),
+}
+
+impl ConnectedMcpClient {
+    async fn connect(config: &BakeConfig) -> Result<Self> {
+        match config.source_type {
+            SourceType::Stdio => {
+                let env = parse_env_vars(&config.env_vars);
+                Ok(Self::Stdio(
+                    mcp_stdio::StdioClient::connect(&config.source, &env, None).await?,
+                ))
+            }
+            SourceType::Http => {
+                let headers = parse_headers(&config.auth_headers)?;
+                Ok(Self::Http(
+                    mcp_http::HttpClient::connect(&config.source, &headers).await?,
+                ))
+            }
+            _ => Err(sxmc::error::SxmcError::Other(format!(
+                "Bake '{}' is not an MCP connection. Only stdio/http bakes are supported.",
+                config.name
+            ))),
+        }
+    }
+
+    async fn list_tools(&self) -> Result<Vec<Tool>> {
+        match self {
+            Self::Stdio(client) => client.list_tools().await,
+            Self::Http(client) => client.list_tools().await,
+        }
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<rmcp::model::CallToolResult> {
+        match self {
+            Self::Stdio(client) => client.call_tool(name, arguments).await,
+            Self::Http(client) => client.call_tool(name, arguments).await,
+        }
+    }
+
+    async fn list_prompts(&self) -> Result<Vec<Prompt>> {
+        match self {
+            Self::Stdio(client) => client.list_prompts().await,
+            Self::Http(client) => client.list_prompts().await,
+        }
+    }
+
+    async fn get_prompt(
+        &self,
+        name: &str,
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<rmcp::model::GetPromptResult> {
+        match self {
+            Self::Stdio(client) => client.get_prompt(name, arguments).await,
+            Self::Http(client) => client.get_prompt(name, arguments).await,
+        }
+    }
+
+    async fn list_resources(&self) -> Result<Vec<Resource>> {
+        match self {
+            Self::Stdio(client) => client.list_resources().await,
+            Self::Http(client) => client.list_resources().await,
+        }
+    }
+
+    async fn read_resource(&self, uri: &str) -> Result<rmcp::model::ReadResourceResult> {
+        match self {
+            Self::Stdio(client) => client.read_resource(uri).await,
+            Self::Http(client) => client.read_resource(uri).await,
+        }
+    }
+
+    async fn close(self) -> Result<()> {
+        match self {
+            Self::Stdio(client) => client.close().await,
+            Self::Http(client) => client.close().await,
+        }
+    }
+}
+
+fn baked_mcp_servers(store: &BakeStore) -> Vec<&BakeConfig> {
+    store
+        .list()
+        .into_iter()
+        .filter(|config| matches!(config.source_type, SourceType::Stdio | SourceType::Http))
+        .collect()
+}
+
+fn get_baked_mcp_server(store: &BakeStore, name: &str) -> Result<BakeConfig> {
+    let config = store.get(name).cloned().ok_or_else(|| {
+        sxmc::error::SxmcError::Other(format!(
+            "Bake '{}' not found. Use `sxmc mcp servers` to see available MCP connections.",
+            name
+        ))
+    })?;
+
+    if !matches!(config.source_type, SourceType::Stdio | SourceType::Http) {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Bake '{}' uses {:?}, not stdio/http MCP.",
+            name, config.source_type
+        )));
+    }
+
+    Ok(config)
+}
+
+fn split_server_target(target: &str) -> Result<(&str, &str)> {
+    target.split_once('/').ok_or_else(|| {
+        sxmc::error::SxmcError::Other(format!(
+            "Invalid target '{}'. Expected SERVER/NAME.",
+            target
+        ))
+    })
+}
+
+fn parse_json_object_arg(
+    payload: Option<String>,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let Some(payload) = payload else {
+        return Ok(serde_json::Map::new());
+    };
+
+    let raw = if payload == "-" {
+        use std::io::Read;
+        let mut buffer = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .map_err(|e| sxmc::error::SxmcError::Other(format!("Failed to read stdin: {}", e)))?;
+        buffer
+    } else {
+        payload
+    };
+
+    if raw.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+
+    let value: Value = serde_json::from_str(&raw).map_err(|e| {
+        sxmc::error::SxmcError::Other(format!("MCP tool payload must be a JSON object: {}", e))
+    })?;
+
+    value.as_object().cloned().ok_or_else(|| {
+        sxmc::error::SxmcError::Other("MCP tool payload must be a JSON object.".into())
+    })
+}
+
+fn format_mcp_grep_results(
+    results: &[(String, Tool)],
+    pattern: &str,
+    limit: Option<usize>,
+) -> String {
+    let total = results.len();
+    if total == 0 {
+        return format!("No MCP tools matched '{}'.", pattern);
+    }
+
+    let shown = limit.unwrap_or(total).min(total);
+    let mut lines = Vec::new();
+    for (server, tool) in results.iter().take(shown) {
+        lines.push(format!("  {}/{}", server, tool.name.as_ref()));
+        if let Some(description) = &tool.description {
+            lines.push(format!("    {}", description));
+        }
+    }
+
+    let header = if shown < total {
+        format!("Matches for '{}' ({} shown of {}):", pattern, shown, total)
+    } else {
+        format!("Matches for '{}' ({}):", pattern, total)
+    };
+
+    format!("{}\n{}", header, lines.join("\n"))
 }
 
 #[derive(Clone, Copy)]
@@ -568,17 +896,52 @@ fn build_mcp_description(
     tools: &[Tool],
     prompts: &[Prompt],
     resources: &[Resource],
+    limit: Option<usize>,
 ) -> Value {
+    let tool_limit = limit.unwrap_or(tools.len()).min(tools.len());
+    let prompt_limit = limit.unwrap_or(prompts.len()).min(prompts.len());
+    let resource_limit = limit.unwrap_or(resources.len()).min(resources.len());
     let mut description = output::summarize_server_info(server_info);
+    description["detail_mode"] = json!("summary");
     description["counts"] = json!({
         "tools": tools.len(),
         "prompts": prompts.len(),
         "resources": resources.len(),
     });
-    description["tools"] = Value::Array(tools.iter().map(output::summarize_tool).collect());
-    description["prompts"] = Value::Array(prompts.iter().map(output::summarize_prompt).collect());
-    description["resources"] =
-        Value::Array(resources.iter().map(output::summarize_resource).collect());
+    description["shown"] = json!({
+        "tools": tool_limit,
+        "prompts": prompt_limit,
+        "resources": resource_limit,
+    });
+    description["truncated"] = json!({
+        "tools": tool_limit < tools.len(),
+        "prompts": prompt_limit < prompts.len(),
+        "resources": resource_limit < resources.len(),
+    });
+    if let Some(limit) = limit {
+        description["limit"] = json!(limit);
+    }
+    description["tools"] = Value::Array(
+        tools
+            .iter()
+            .take(tool_limit)
+            .map(output::summarize_tool_brief)
+            .collect(),
+    );
+    description["prompts"] = Value::Array(
+        prompts
+            .iter()
+            .take(prompt_limit)
+            .map(output::summarize_prompt)
+            .collect(),
+    );
+    description["resources"] = Value::Array(
+        resources
+            .iter()
+            .take(resource_limit)
+            .map(output::summarize_resource)
+            .collect(),
+    );
     description
 }
 
@@ -681,6 +1044,8 @@ async fn main() -> anyhow::Result<()> {
             search,
             describe,
             describe_tool,
+            format,
+            limit,
             pretty,
             env_vars,
             cwd,
@@ -726,7 +1091,7 @@ async fn main() -> anyhow::Result<()> {
                         .ok_or_else(|| {
                             sxmc::error::SxmcError::Other(format!("Tool not found: {}", name))
                         })?;
-                    println!("{}", output::format_tool_detail(tool, pretty));
+                    println!("{}", output::format_tool_detail(tool, pretty, format));
                 } else if describe {
                     let prompts = if needs_prompts {
                         list_optional_surface(
@@ -748,15 +1113,23 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         Vec::new()
                     };
-                    let description =
-                        build_mcp_description(server_info.as_ref(), &tools, &prompts, &resources);
-                    let format = output::resolve_structured_format(None, pretty);
+                    let description = build_mcp_description(
+                        server_info.as_ref(),
+                        &tools,
+                        &prompts,
+                        &resources,
+                        limit,
+                    );
+                    let format = output::resolve_structured_format(format, pretty);
                     println!("{}", output::format_structured_value(&description, format));
                 } else {
                     let mut printed_any = false;
 
                     if list || list_tools || search.is_some() {
-                        println!("{}", output::format_tool_list(&tools, search.as_deref()));
+                        println!(
+                            "{}",
+                            output::format_tool_list(&tools, search.as_deref(), limit)
+                        );
                         printed_any = true;
                     }
 
@@ -776,7 +1149,7 @@ async fn main() -> anyhow::Result<()> {
                                 capabilities.supports(McpSurface::Prompts),
                             );
                         } else {
-                            println!("{}", output::format_prompt_list(&prompts));
+                            println!("{}", output::format_prompt_list(&prompts, limit));
                         }
                         printed_any = true;
                     }
@@ -797,7 +1170,7 @@ async fn main() -> anyhow::Result<()> {
                                 capabilities.supports(McpSurface::Resources),
                             );
                         } else {
-                            println!("{}", output::format_resource_list(&resources));
+                            println!("{}", output::format_resource_list(&resources, limit));
                         }
                     }
                 }
@@ -837,6 +1210,8 @@ async fn main() -> anyhow::Result<()> {
             search,
             describe,
             describe_tool,
+            format,
+            limit,
             pretty,
             auth_headers,
         } => {
@@ -881,7 +1256,7 @@ async fn main() -> anyhow::Result<()> {
                         .ok_or_else(|| {
                             sxmc::error::SxmcError::Other(format!("Tool not found: {}", name))
                         })?;
-                    println!("{}", output::format_tool_detail(tool, pretty));
+                    println!("{}", output::format_tool_detail(tool, pretty, format));
                 } else if describe {
                     let prompts = if needs_prompts {
                         list_optional_surface(
@@ -903,15 +1278,23 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         Vec::new()
                     };
-                    let description =
-                        build_mcp_description(server_info.as_ref(), &tools, &prompts, &resources);
-                    let format = output::resolve_structured_format(None, pretty);
+                    let description = build_mcp_description(
+                        server_info.as_ref(),
+                        &tools,
+                        &prompts,
+                        &resources,
+                        limit,
+                    );
+                    let format = output::resolve_structured_format(format, pretty);
                     println!("{}", output::format_structured_value(&description, format));
                 } else {
                     let mut printed_any = false;
 
                     if list || list_tools || search.is_some() {
-                        println!("{}", output::format_tool_list(&tools, search.as_deref()));
+                        println!(
+                            "{}",
+                            output::format_tool_list(&tools, search.as_deref(), limit)
+                        );
                         printed_any = true;
                     }
 
@@ -931,7 +1314,7 @@ async fn main() -> anyhow::Result<()> {
                                 capabilities.supports(McpSurface::Prompts),
                             );
                         } else {
-                            println!("{}", output::format_prompt_list(&prompts));
+                            println!("{}", output::format_prompt_list(&prompts, limit));
                         }
                         printed_any = true;
                     }
@@ -952,7 +1335,7 @@ async fn main() -> anyhow::Result<()> {
                                 capabilities.supports(McpSurface::Resources),
                             );
                         } else {
-                            println!("{}", output::format_resource_list(&resources));
+                            println!("{}", output::format_resource_list(&resources, limit));
                         }
                     }
                 }
@@ -979,6 +1362,194 @@ async fn main() -> anyhow::Result<()> {
 
             client.close().await?;
         }
+
+        Commands::Mcp { action } => match action {
+            McpAction::Servers { pretty, format } => {
+                let store = BakeStore::load()?;
+                let servers = baked_mcp_servers(&store);
+
+                if format.is_some() || pretty {
+                    let value = Value::Array(
+                        servers
+                            .iter()
+                            .map(|config| {
+                                json!({
+                                    "name": config.name,
+                                    "transport": match config.source_type {
+                                        SourceType::Stdio => "stdio",
+                                        SourceType::Http => "http",
+                                        _ => "unsupported",
+                                    },
+                                    "source": config.source,
+                                    "description": config.description,
+                                })
+                            })
+                            .collect(),
+                    );
+                    let format = output::resolve_structured_format(format, pretty);
+                    println!("{}", output::format_structured_value(&value, format));
+                } else if servers.is_empty() {
+                    println!("No baked MCP servers found.");
+                    println!("Create one with: sxmc bake create NAME --type stdio --source '...'");
+                } else {
+                    println!("MCP servers ({}):", servers.len());
+                    for config in servers {
+                        let transport = match config.source_type {
+                            SourceType::Stdio => "stdio",
+                            SourceType::Http => "http",
+                            _ => "unsupported",
+                        };
+                        println!("  {} [{}]", config.name, transport);
+                        if let Some(description) = &config.description {
+                            println!("    {}", description);
+                        }
+                    }
+                }
+            }
+            McpAction::Tools {
+                server,
+                search,
+                limit,
+            } => {
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, &server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let tools = client.list_tools().await?;
+                println!(
+                    "{}",
+                    output::format_tool_list(&tools, search.as_deref(), limit)
+                );
+                client.close().await?;
+            }
+            McpAction::Grep {
+                pattern,
+                server,
+                limit,
+            } => {
+                let store = BakeStore::load()?;
+                let mut results: Vec<(String, Tool)> = Vec::new();
+
+                let configs: Vec<BakeConfig> = if let Some(server) = server {
+                    vec![get_baked_mcp_server(&store, &server)?]
+                } else {
+                    baked_mcp_servers(&store).into_iter().cloned().collect()
+                };
+
+                for config in configs {
+                    let server_name = config.name.clone();
+                    let client = ConnectedMcpClient::connect(&config).await?;
+                    let tools = client.list_tools().await?;
+                    client.close().await?;
+
+                    let pattern_lower = pattern.to_lowercase();
+                    for tool in tools {
+                        let name = tool.name.as_ref().to_lowercase();
+                        let desc = tool.description.as_deref().unwrap_or("").to_lowercase();
+                        if name.contains(&pattern_lower) || desc.contains(&pattern_lower) {
+                            results.push((server_name.clone(), tool));
+                        }
+                    }
+                }
+
+                results.sort_by(|a, b| {
+                    a.0.cmp(&b.0)
+                        .then_with(|| a.1.name.as_ref().cmp(b.1.name.as_ref()))
+                });
+
+                println!("{}", format_mcp_grep_results(&results, &pattern, limit));
+            }
+            McpAction::Prompts { server, limit } => {
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, &server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let prompts =
+                    list_optional_surface(McpSurface::Prompts, None, client.list_prompts()).await?;
+                if prompts.is_empty() {
+                    print_empty_surface_notice(McpSurface::Prompts, None);
+                } else {
+                    println!("{}", output::format_prompt_list(&prompts, limit));
+                }
+                client.close().await?;
+            }
+            McpAction::Resources { server, limit } => {
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, &server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let resources =
+                    list_optional_surface(McpSurface::Resources, None, client.list_resources())
+                        .await?;
+                if resources.is_empty() {
+                    print_empty_surface_notice(McpSurface::Resources, None);
+                } else {
+                    println!("{}", output::format_resource_list(&resources, limit));
+                }
+                client.close().await?;
+            }
+            McpAction::Info {
+                target,
+                pretty,
+                format,
+            } => {
+                let (server, tool_name) = split_server_target(&target)?;
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let tools = client.list_tools().await?;
+                let tool = tools
+                    .iter()
+                    .find(|tool| tool.name.as_ref() == tool_name)
+                    .ok_or_else(|| {
+                        sxmc::error::SxmcError::Other(format!(
+                            "Tool '{}' not found on server '{}'",
+                            tool_name, server
+                        ))
+                    })?;
+                println!("{}", output::format_tool_detail(tool, pretty, format));
+                client.close().await?;
+            }
+            McpAction::Call {
+                target,
+                payload,
+                pretty,
+            } => {
+                let (server, tool_name) = split_server_target(&target)?;
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let arguments = parse_json_object_arg(payload)?;
+                let result = client.call_tool(tool_name, arguments).await?;
+                println!("{}", output::format_tool_result(&result, pretty));
+                client.close().await?;
+            }
+            McpAction::Read { target, pretty } => {
+                let (server, resource_uri) = split_server_target(&target)?;
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let result = client.read_resource(resource_uri).await?;
+                println!("{}", output::format_resource_result(&result, pretty));
+                client.close().await?;
+            }
+            McpAction::Prompt {
+                target,
+                args,
+                pretty,
+            } => {
+                let (server, prompt_name) = split_server_target(&target)?;
+                let store = BakeStore::load()?;
+                let config = get_baked_mcp_server(&store, server)?;
+                let client = ConnectedMcpClient::connect(&config).await?;
+                let arguments = parse_kv_args(&args);
+                let arguments = if arguments.is_empty() {
+                    None
+                } else {
+                    Some(arguments)
+                };
+                let result = client.get_prompt(prompt_name, arguments).await?;
+                println!("{}", output::format_prompt_result(&result, pretty));
+                client.close().await?;
+            }
+        },
 
         Commands::Api {
             source,
@@ -1142,6 +1713,19 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(exit_code);
             }
         }
+
+        Commands::Inspect { action } => match action {
+            InspectAction::Profile {
+                input,
+                pretty,
+                format,
+            } => {
+                let raw = std::fs::read_to_string(&input)?;
+                let value: Value = serde_json::from_str(&raw)?;
+                let format = output::resolve_structured_format(format, pretty);
+                println!("{}", output::format_structured_value(&value, format));
+            }
+        },
 
         Commands::Bake { action } => match action {
             BakeAction::Create {

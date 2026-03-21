@@ -2,7 +2,8 @@
 
 This document records **manual verification** (2026-03) that **sxmc** can act
 as an MCP **client** and expose remote or stdio MCP servers through the CLI
-bridge: **`sxmc stdio`** and **`sxmc http`**.
+bridge: **`sxmc stdio`**, **`sxmc http`**, and the baked, schema-on-demand
+workflow under **`sxmc mcp`**.
 
 ## What “MCP → CLI” means in sxmc today
 
@@ -10,17 +11,22 @@ bridge: **`sxmc stdio`** and **`sxmc http`**.
 
 - listing of **tools**, **prompts**, and **resources**
 - per-surface discovery with `--list-tools`, `--list-prompts`, and `--list-resources`
+- bounded discovery with `--limit N`
 - invocation of **tools**
 - fetching of **prompts** with `--prompt`
 - reading of **resources** with `--resource`
 - structured server introspection with `--describe`
 - single-tool schema/help inspection with `--describe-tool`
 - pretty-printing and shell-friendly inspection of MCP results
+- compact structured inspection with `--format toon`
+- baked MCP server workflows with `sxmc mcp servers|tools|info|call|prompt|read`
+- cross-server search with `sxmc mcp grep`
 
 So the precise contract is:
 
 - **MCP discovery surface:** tools, prompts, resources
 - **MCP invocation surface:** tools, prompts, resources
+- **Low-token workflow:** baked server names plus on-demand `info` before `call`
 
 For the explicit product boundary, including what is not yet supported by the
 CLI bridge, see [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md).
@@ -31,6 +37,7 @@ CLI bridge, see [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md).
 |-----------|-----------|------------|--------|----------|
 | **stdio** | tools, prompts, resources | tools, prompts, resources | **Working** | Live runs + `tests/cli_integration.rs` (`test_stdio_*`) |
 | **HTTP** (streamable MCP) | tools, prompts, resources | tools, prompts, resources | **Working** | Live run against local `sxmc serve --transport http` + `test_http_*` in same file |
+| **baked MCP** (`sxmc mcp`) | named servers, tools, prompts, resources | tools, prompts, resources | **Working** | `test_mcp_*` in `tests/cli_integration.rs` |
 
 ## Best for
 
@@ -39,6 +46,7 @@ CLI bridge, see [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md).
 - debugging MCP servers outside a full agent/IDE
 - inspecting the available tool/prompt/resource surface quickly with `--list`
 - checking negotiated capabilities and schemas with `--describe`
+- keeping discovery small for model-visible contexts with `--limit` and `--format toon`
 - pulling one prompt or resource on demand without loading the whole server into an IDE
 
 ## Implementation (source)
@@ -56,7 +64,8 @@ For **captured stdout/stderr samples** of the nested **skills → MCP → CLI** 
 ```bash
 sxmc stdio "sxmc serve" --list
 sxmc stdio "sxmc serve" --list-tools
-sxmc stdio "sxmc serve" --describe --pretty
+sxmc stdio "sxmc serve" --list-tools --limit 5
+sxmc stdio "sxmc serve" --describe --format toon --limit 10
 sxmc stdio "sxmc serve" --describe-tool get_skill_details
 ```
 
@@ -94,10 +103,14 @@ In another:
 
 ```bash
 sxmc http http://127.0.0.1:8765/mcp --list
-sxmc http http://127.0.0.1:8765/mcp --describe --pretty
+sxmc http http://127.0.0.1:8765/mcp --describe --format toon --limit 10
 ```
 
 Expected: same tool list as stdio serve for the same `--paths` (prompts/resources included).
+
+`--describe` is intentionally summary-oriented so general server inspection stays
+cheap. Use `--describe-tool NAME` only when you need a full schema for a single
+tool.
 
 ```bash
 sxmc http http://127.0.0.1:8765/mcp \
@@ -115,6 +128,24 @@ sxmc http http://127.0.0.1:8765/mcp --resource \
 ```
 
 Expected: prompt/resource retrieval works the same way over remote streamable HTTP MCP.
+
+### 3. `sxmc mcp` (baked, schema-on-demand workflow)
+
+```bash
+sxmc bake create fixture-mcp \
+  --type stdio \
+  --source '["sxmc","serve","--paths","/path/to/sxmc/tests/fixtures"]'
+
+sxmc mcp servers
+sxmc mcp grep skill --limit 10
+sxmc mcp tools fixture-mcp --limit 10
+sxmc mcp info fixture-mcp/get_skill_details --format toon
+sxmc mcp call fixture-mcp/get_skill_details \
+  '{"name":"simple-skill","return_type":"content"}' --pretty
+```
+
+Expected: small discovery output by default, then full schema only when `info`
+is explicitly requested for a single tool.
 
 ## Caveats
 

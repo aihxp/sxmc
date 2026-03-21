@@ -1,0 +1,21 @@
+## MCP CLI Workflow
+
+When working with MCP servers in this repo, prefer `sxmc mcp` over loading large MCP tool definitions into context.
+
+Use this sequence:
+
+1. `sxmc mcp servers`
+2. `sxmc mcp grep <pattern>` or `sxmc mcp tools <server> --limit 10`
+3. `sxmc mcp info <server/tool> --format toon`
+4. `sxmc mcp call <server/tool> '<json-object>'`
+
+Other surfaces:
+
+- prompts: `sxmc mcp prompt <server/prompt> key=value`
+- resources: `sxmc mcp read <server/resource-uri>`
+
+Token-saving guidance:
+
+- inspect one tool at a time
+- avoid broad `--describe` output unless needed
+- pipe large JSON through `jq` or files instead of pasting full results into chat

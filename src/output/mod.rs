@@ -111,78 +111,113 @@ pub fn format_resource_result(result: &ReadResourceResult, pretty: bool) -> Stri
 }
 
 /// Format MCP tools as a list for display.
-pub fn format_tool_list(tools: &[Tool], search: Option<&str>) -> String {
-    let mut lines = Vec::new();
+pub fn format_tool_list(tools: &[Tool], search: Option<&str>, limit: Option<usize>) -> String {
+    let filtered: Vec<&Tool> = tools
+        .iter()
+        .filter(|tool| {
+            let name = tool.name.as_ref();
+            let desc = tool.description.as_deref().unwrap_or("");
 
-    for tool in tools {
-        let name = tool.name.as_ref();
-        let desc = tool.description.as_deref().unwrap_or("");
-
-        if let Some(pattern) = search {
-            let pattern_lower = pattern.to_lowercase();
-            if !name.to_lowercase().contains(&pattern_lower)
-                && !desc.to_lowercase().contains(&pattern_lower)
-            {
-                continue;
+            if let Some(pattern) = search {
+                let pattern_lower = pattern.to_lowercase();
+                name.to_lowercase().contains(&pattern_lower)
+                    || desc.to_lowercase().contains(&pattern_lower)
+            } else {
+                true
             }
-        }
+        })
+        .collect();
 
-        lines.push(format!("  {}", name));
-        if !desc.is_empty() {
-            lines.push(format!("    {}", desc));
-        }
-    }
-
-    if lines.is_empty() {
+    if filtered.is_empty() {
         if search.is_some() {
             return "No matching tools found.".to_string();
         }
         return "No tools available.".to_string();
     }
 
-    format!("Tools ({}):\n{}", tools.len(), lines.join("\n"))
+    let total = filtered.len();
+    let shown = limit.unwrap_or(total).min(total);
+    let mut lines = Vec::new();
+
+    for tool in filtered.into_iter().take(shown) {
+        let name = tool.name.as_ref();
+        let desc = tool.description.as_deref().unwrap_or("");
+        lines.push(format!("  {}", name));
+        if !desc.is_empty() {
+            lines.push(format!("    {}", desc));
+        }
+    }
+
+    let header = if shown < total {
+        format!("Tools ({} shown of {}):", shown, total)
+    } else {
+        format!("Tools ({}):", total)
+    };
+
+    format!("{}\n{}", header, lines.join("\n"))
 }
 
 /// Format MCP prompts as a list for display.
-pub fn format_prompt_list(prompts: &[Prompt]) -> String {
+pub fn format_prompt_list(prompts: &[Prompt], limit: Option<usize>) -> String {
+    if prompts.is_empty() {
+        return "No prompts available.".to_string();
+    }
+
+    let total = prompts.len();
+    let shown = limit.unwrap_or(total).min(total);
     let mut lines = Vec::new();
 
-    for prompt in prompts {
+    for prompt in prompts.iter().take(shown) {
         lines.push(format!("  {}", prompt.name));
         if let Some(ref desc) = prompt.description {
             lines.push(format!("    {}", desc));
         }
     }
 
-    if lines.is_empty() {
-        return "No prompts available.".to_string();
-    }
+    let header = if shown < total {
+        format!("Prompts ({} shown of {}):", shown, total)
+    } else {
+        format!("Prompts ({}):", total)
+    };
 
-    format!("Prompts ({}):\n{}", prompts.len(), lines.join("\n"))
+    format!("{}\n{}", header, lines.join("\n"))
 }
 
 /// Format MCP resources as a list for display.
-pub fn format_resource_list(resources: &[Resource]) -> String {
+pub fn format_resource_list(resources: &[Resource], limit: Option<usize>) -> String {
+    if resources.is_empty() {
+        return "No resources available.".to_string();
+    }
+
+    let total = resources.len();
+    let shown = limit.unwrap_or(total).min(total);
     let mut lines = Vec::new();
 
-    for resource in resources {
+    for resource in resources.iter().take(shown) {
         lines.push(format!("  {} ({})", resource.name, resource.uri));
         if let Some(ref desc) = resource.description {
             lines.push(format!("    {}", desc));
         }
     }
 
-    if lines.is_empty() {
-        return "No resources available.".to_string();
-    }
+    let header = if shown < total {
+        format!("Resources ({} shown of {}):", shown, total)
+    } else {
+        format!("Resources ({}):", total)
+    };
 
-    format!("Resources ({}):\n{}", resources.len(), lines.join("\n"))
+    format!("{}\n{}", header, lines.join("\n"))
 }
 
-pub fn format_tool_detail(tool: &Tool, pretty: bool) -> String {
+pub fn format_tool_detail(
+    tool: &Tool,
+    pretty: bool,
+    format: Option<StructuredOutputFormat>,
+) -> String {
     let summary = summarize_tool(tool);
-    if pretty {
-        return serde_json::to_string_pretty(&summary).unwrap_or_else(|_| summary.to_string());
+    if pretty || format.is_some() {
+        let format = resolve_structured_format(format, pretty);
+        return format_structured_value(&summary, format);
     }
 
     let mut lines = vec![format!("Tool: {}", tool.name)];
@@ -321,6 +356,43 @@ pub fn summarize_tool(tool: &Tool) -> Value {
             .output_schema
             .as_ref()
             .map(|schema| Value::Object((**schema).clone())),
+    })
+}
+
+pub fn summarize_tool_brief(tool: &Tool) -> Value {
+    let required = tool
+        .input_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(ToString::to_string))
+        .collect::<Vec<_>>();
+
+    let parameter_names = tool
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    json!({
+        "name": tool.name,
+        "title": tool.title,
+        "description": tool.description,
+        "parameter_count": parameter_names.len(),
+        "parameter_names": parameter_names,
+        "required_parameters": required,
+        "annotations": tool.annotations.as_ref().map(|annotations| json!({
+            "read_only": annotations.read_only_hint,
+            "destructive": annotations.destructive_hint,
+            "idempotent": annotations.idempotent_hint,
+            "open_world": annotations.open_world_hint,
+        })),
+        "execution": tool.execution.as_ref().map(|execution| json!({
+            "task_support": execution.task_support.map(|support| format!("{:?}", support).to_lowercase()),
+        })),
     })
 }
 
@@ -547,6 +619,32 @@ fn indent_str(indent: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::Tool;
+    use std::sync::Arc;
+
+    fn make_tool(name: &str, desc: &str, properties: &[&str]) -> Tool {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": properties
+                .iter()
+                .map(|name| {
+                    (
+                        (*name).to_string(),
+                        serde_json::json!({
+                            "type": "string",
+                            "description": format!("{} description", name),
+                        }),
+                    )
+                })
+                .collect::<serde_json::Map<String, Value>>(),
+            "required": properties,
+        });
+        Tool::new(
+            name.to_string(),
+            desc.to_string(),
+            Arc::new(schema.as_object().cloned().unwrap_or_default()),
+        )
+    }
 
     #[test]
     fn test_format_structured_value_json_compact() {
@@ -586,5 +684,29 @@ mod tests {
         assert!(output.contains("pets[2]{id,name}:"));
         assert!(output.contains(r#"  1,"Mochi""#));
         assert!(output.contains(r#"  2,"Pixel""#));
+    }
+
+    #[test]
+    fn test_format_tool_list_shows_truncation_counts() {
+        let tools = vec![
+            make_tool("first", "First tool", &["query"]),
+            make_tool("second", "Second tool", &["query"]),
+        ];
+
+        let output = format_tool_list(&tools, None, Some(1));
+        assert!(output.contains("Tools (1 shown of 2):"));
+        assert!(output.contains("first"));
+        assert!(!output.contains("second"));
+    }
+
+    #[test]
+    fn test_summarize_tool_brief_omits_full_schema() {
+        let tool = make_tool("search", "Search things", &["query", "limit"]);
+        let summary = summarize_tool_brief(&tool);
+
+        assert_eq!(summary["parameter_count"], 2);
+        assert!(summary["parameter_names"].to_string().contains("query"));
+        assert!(summary.get("input_schema").is_none());
+        assert!(summary.get("output_schema").is_none());
     }
 }

@@ -3,6 +3,16 @@
 This document turns the `CLI -> AI surfaces` idea into a concrete product model
 for `sxmc`.
 
+Current preview path:
+
+```bash
+sxmc inspect profile examples/profiles/from_cli.json --format toon
+sxmc inspect profile examples/profiles/from_generated_cli.json --pretty
+```
+
+That keeps JSON as the canonical profile format while allowing a more compact,
+TOON-style view when you want to inspect large profiles quickly.
+
 ## Goal
 
 Take a real CLI or a generated CLI wrapper, inspect it into a normalized JSON

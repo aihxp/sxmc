@@ -28,10 +28,12 @@ These are the core product paths we should treat as stable:
 
 - `sxmc stdio` can discover and invoke tools, prompts, and resources from a stdio MCP server
 - `sxmc http` can discover and invoke tools, prompts, and resources from a streamable HTTP MCP server
+- `sxmc mcp` can discover and invoke tools, prompts, and resources from baked stdio/http MCP connections
 - `--list`, `--list-tools`, `--list-prompts`, `--list-resources`, `--describe`, and `--describe-tool` are supported CLI surfaces
 - one-shot tool execution is supported
 - one-shot prompt fetches with `--prompt` are supported
 - one-shot resource reads with `--resource` are supported
+- baked `server/tool` workflows are supported through `mcp servers|grep|tools|info|call|prompt|read`
 
 ### 3. API -> CLI
 

@@ -3,11 +3,19 @@ use axum::{routing::get, Json, Router};
 use predicates::prelude::*;
 use std::fs;
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::Command as ProcessCommand;
 use std::time::Duration;
 
 fn sxmc() -> Command {
     Command::cargo_bin("sxmc").unwrap()
+}
+
+fn sxmc_with_config_home(home: &Path) -> Command {
+    let mut cmd = sxmc();
+    cmd.env("HOME", home);
+    cmd.env("XDG_CONFIG_HOME", home.join(".config"));
+    cmd
 }
 
 fn sxmc_bin_string() -> String {
@@ -58,7 +66,9 @@ fn test_help() {
         .stdout(predicate::str::contains("skills"))
         .stdout(predicate::str::contains("stdio"))
         .stdout(predicate::str::contains("http"))
+        .stdout(predicate::str::contains("mcp"))
         .stdout(predicate::str::contains("api"))
+        .stdout(predicate::str::contains("inspect"))
         .stdout(predicate::str::contains("scan"))
         .stdout(predicate::str::contains("bake"));
 }
@@ -120,6 +130,38 @@ fn test_skills_run() {
         .args(["skills", "run", "simple-skill", "--paths", "tests/fixtures"])
         .assert()
         .success();
+}
+
+#[test]
+fn test_inspect_profile_toon() {
+    sxmc()
+        .args([
+            "inspect",
+            "profile",
+            "examples/profiles/from_cli.json",
+            "--format",
+            "toon",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("profile_schema:"))
+        .stdout(predicate::str::contains("command:"))
+        .stdout(predicate::str::contains("subcommands["));
+}
+
+#[test]
+fn test_inspect_profile_json_pretty() {
+    sxmc()
+        .args([
+            "inspect",
+            "profile",
+            "examples/profiles/from_generated_cli.json",
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"profile_schema\":"))
+        .stdout(predicate::str::contains("\"generation_depth\": 1"));
 }
 
 #[test]
@@ -269,6 +311,152 @@ fn test_bake_lifecycle() {
 }
 
 #[test]
+fn test_mcp_servers_and_tools_via_bake() {
+    let temp = tempfile::tempdir().unwrap();
+    let inner = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--paths".to_string(),
+        "tests/fixtures".to_string(),
+    ])
+    .unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-mcp",
+            "--type",
+            "stdio",
+            "--source",
+            &inner,
+            "--description",
+            "Fixture MCP server",
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args(["mcp", "servers"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fixture-mcp [stdio]"))
+        .stdout(predicate::str::contains("Fixture MCP server"));
+
+    sxmc_with_config_home(temp.path())
+        .args(["mcp", "tools", "fixture-mcp", "--limit", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Tools (2 shown of"))
+        .stdout(predicate::str::contains("get_available_skills"));
+}
+
+#[test]
+fn test_mcp_grep_via_bake() {
+    let temp = tempfile::tempdir().unwrap();
+    let inner = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--paths".to_string(),
+        "tests/fixtures".to_string(),
+    ])
+    .unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-mcp",
+            "--type",
+            "stdio",
+            "--source",
+            &inner,
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args(["mcp", "grep", "skill", "--limit", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Matches for 'skill'"))
+        .stdout(predicate::str::contains("fixture-mcp/get_available_skills"))
+        .stdout(predicate::str::contains("fixture-mcp/get_skill_details"));
+}
+
+#[test]
+fn test_mcp_info_call_prompt_and_read_via_bake() {
+    let temp = tempfile::tempdir().unwrap();
+    let inner = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--paths".to_string(),
+        "tests/fixtures".to_string(),
+    ])
+    .unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-mcp",
+            "--type",
+            "stdio",
+            "--source",
+            &inner,
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "mcp",
+            "info",
+            "fixture-mcp/get_skill_details",
+            "--format",
+            "toon",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#"name: "get_skill_details""#))
+        .stdout(predicate::str::contains("input_schema:"));
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "mcp",
+            "call",
+            "fixture-mcp/get_skill_details",
+            r#"{"name":"simple-skill","return_type":"both"}"#,
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"simple-skill\""));
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "mcp",
+            "prompt",
+            "fixture-mcp/simple-skill",
+            "arguments=friend",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello friend, welcome to sxmc!"));
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "mcp",
+            "read",
+            "fixture-mcp/skill://skill-with-references/references/style-guide.md",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Style Guide"))
+        .stdout(predicate::str::contains("Use clear, concise language"));
+}
+
+#[test]
 fn test_no_subcommand_shows_help() {
     sxmc()
         .assert()
@@ -337,6 +525,38 @@ fn test_stdio_describe_reports_capabilities_and_counts() {
 }
 
 #[test]
+fn test_stdio_describe_is_summary_oriented_and_respects_limit() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--describe", "--pretty", "--limit", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"detail_mode\": \"summary\""))
+        .stdout(predicate::str::contains("\"limit\": 1"))
+        .stdout(predicate::str::contains("\"shown\""))
+        .stdout(predicate::str::contains("\"parameter_count\""))
+        .stdout(predicate::str::contains("\"parameter_names\""))
+        .stdout(predicate::str::contains("\"truncated\""))
+        .stdout(predicate::str::contains("\"tools\": true"))
+        .stdout(predicate::str::contains("\"prompts\": true"))
+        .stdout(predicate::str::contains("\"resources\": true"))
+        .stdout(predicate::str::contains("\"input_schema\"").not());
+}
+
+#[test]
+fn test_stdio_list_tools_respects_limit() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args(["stdio", &inner, "--list-tools", "--limit", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Tools (1 shown of"))
+        .stdout(predicate::str::contains("get_available_skills"));
+}
+
+#[test]
 fn test_stdio_describe_tool_shows_schema_summary() {
     let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
 
@@ -347,6 +567,26 @@ fn test_stdio_describe_tool_shows_schema_summary() {
         .stdout(predicate::str::contains("Tool: get_skill_details"))
         .stdout(predicate::str::contains("name [required]"))
         .stdout(predicate::str::contains("Parameters"));
+}
+
+#[test]
+fn test_stdio_describe_tool_supports_toon_format() {
+    let inner = format!("{} serve --paths tests/fixtures", sxmc_bin_string());
+
+    sxmc()
+        .args([
+            "stdio",
+            &inner,
+            "--describe-tool",
+            "get_skill_details",
+            "--format",
+            "toon",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#"name: "get_skill_details""#))
+        .stdout(predicate::str::contains("parameters:"))
+        .stdout(predicate::str::contains("input_schema:"));
 }
 
 #[test]

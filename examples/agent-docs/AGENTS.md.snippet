@@ -1,0 +1,17 @@
+## MCP Workflow
+
+Use `sxmc mcp` for MCP access instead of assuming tools are loaded into the prompt.
+
+Recommended flow:
+
+1. Discover servers with `sxmc mcp servers`.
+2. Search tools with `sxmc mcp grep <pattern>` or list one server with `sxmc mcp tools <server> --limit 10`.
+3. Inspect one tool before calling it with `sxmc mcp info <server/tool> --format toon`.
+4. Call the tool with `sxmc mcp call <server/tool> '<json-object>'`.
+5. Use `sxmc mcp prompt <server/prompt> ...` and `sxmc mcp read <server/resource-uri>` for prompt/resource access.
+
+Keep large structured output out of chat when possible:
+
+- pipe JSON to `jq`
+- redirect bulky output to files
+- fetch schema/details only for the specific tool you need

@@ -175,20 +175,34 @@ sxmc http https://mcp.example.com/mcp --prompt triage-template
 sxmc http https://mcp.example.com/mcp --resource "repo://octocat/hello-world/README.md"
 ```
 
+For day-to-day MCP use, prefer baked connections through `sxmc mcp`. Use
+`sxmc stdio` and `sxmc http` as the raw transport layer when you need ad hoc
+connections or transport-level debugging.
+
 `sxmc stdio` and `sxmc http` are MCP bridges that can:
 - list **tools**, **prompts**, and **resources**
 - list one surface at a time with `--list-tools`, `--list-prompts`, or `--list-resources`
+- keep discovery output bounded with `--limit N`
 - invoke **tools**
 - fetch **prompts** with `--prompt`
 - read **resources** with `--resource`
 - describe the negotiated server surface with `--describe`
 - show one tool’s schema/help with `--describe-tool NAME`
+- render structured MCP inspection more compactly with `--format toon`
 
 This makes them especially useful for shell automation, CI, debugging, and
 inspecting an MCP server outside an IDE or agent UI.
 When a server is tool-only and does not implement prompts/resources,
 generic `--list` now stays successful and skips unsupported surfaces instead of
 failing the whole command.
+General server discovery is intentionally summary-oriented now: `--describe`
+keeps tool metadata lightweight, and `--describe-tool NAME` is the on-demand
+path for full schema detail.
+
+For an even more token-efficient, schema-on-demand workflow, `sxmc` also
+supports baked MCP connections through `sxmc mcp ...`. That gives you a
+stable `server/tool` interface similar to `mcp-cli`, while keeping full tool
+schemas out of the default discovery path.
 
 That means skills can flow through both stages in one go:
 
@@ -196,8 +210,9 @@ That means skills can flow through both stages in one go:
 # Serve local skills over MCP, then bridge that MCP server back into CLI
 sxmc stdio "sxmc serve --paths tests/fixtures" --list
 sxmc stdio "sxmc serve --paths tests/fixtures" --list-tools
+sxmc stdio "sxmc serve --paths tests/fixtures" --list-tools --limit 5
 sxmc stdio "sxmc serve --paths tests/fixtures" get_available_skills --pretty
-sxmc stdio "sxmc serve --paths tests/fixtures" --describe --pretty
+sxmc stdio "sxmc serve --paths tests/fixtures" --describe --format toon --limit 10
 sxmc stdio "sxmc serve --paths tests/fixtures" --describe-tool get_skill_details
 sxmc stdio "sxmc serve --paths tests/fixtures" get_skill_details name=simple-skill --pretty
 sxmc stdio "sxmc serve --paths tests/fixtures" --prompt simple-skill arguments=friend
@@ -214,20 +229,41 @@ Hosted MCP servers work the same way over HTTP:
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --list
-
-For a captured end-to-end sample of this exact `skills -> MCP -> CLI` path, see
-[`docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md`](docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md).
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
-  --describe --pretty
+  --describe --format toon --limit 10
 sxmc http http://127.0.0.1:8000/mcp \
   --auth-header "Authorization: Bearer $SXMC_MCP_TOKEN" \
   --prompt simple-skill arguments=friend
 ```
 
+For a captured end-to-end sample of this exact `skills -> MCP -> CLI` path, see
+[`docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md`](docs/SKILLS_TO_MCP_TO_CLI_SAMPLES.md).
+
 For hosted `/mcp` endpoints, prefer `--require-header` so remote access is not
 left open by default. For single-token hosted deployments, `--bearer-token` is
 usually the friendlier option.
+
+You can also bake an MCP connection once, then use it through the lighter
+`sxmc mcp` workflow:
+
+```bash
+sxmc bake create fixture-mcp \
+  --type stdio \
+  --source '["sxmc","serve","--paths","tests/fixtures"]'
+
+sxmc mcp servers
+sxmc mcp grep skill --limit 10
+sxmc mcp tools fixture-mcp --limit 10
+sxmc mcp info fixture-mcp/get_skill_details --format toon
+sxmc mcp call fixture-mcp/get_skill_details \
+  '{"name":"simple-skill","return_type":"content"}' --pretty
+sxmc mcp prompt fixture-mcp/simple-skill arguments=friend
+sxmc mcp read fixture-mcp/skill://skill-with-references/references/style-guide.md
+```
+
+Agent workflow snippets for `AGENTS.md` / `CLAUDE.md` live in
+[`docs/MCP_AGENT_SNIPPETS.md`](docs/MCP_AGENT_SNIPPETS.md).
 Hosted deployment guidance, reverse-proxy notes, and operational checks are in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
@@ -415,6 +451,15 @@ SKILLS:
 CLIENT:
   stdio <command> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--list-tools] [--list-prompts] [--list-resources] [--describe] [--describe-tool NAME] [--search] [--pretty] [--env K=V] [--cwd DIR]
   http <url> [tool] [args...] [--prompt NAME] [--resource URI] [--list] [--list-tools] [--list-prompts] [--list-resources] [--describe] [--describe-tool NAME] [--search] [--pretty] [--auth-header K:V]
+  mcp servers
+  mcp grep <pattern> [--server NAME] [--limit N]
+  mcp tools <server> [--search PATTERN] [--limit N]
+  mcp prompts <server> [--limit N]
+  mcp resources <server> [--limit N]
+  mcp info <server/tool> [--pretty] [--format json|json-pretty|toon]
+  mcp call <server/tool> [json-object|-] [--pretty]
+  mcp prompt <server/prompt> [key=value...]
+  mcp read <server/resource-uri> [--pretty]
   api <source> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
   spec <source> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
   graphql <url> [operation] [args...] [--list] [--pretty] [--format json|json-pretty|toon] [--auth-header K:V]
