@@ -1,6 +1,6 @@
 # sxmc
 
-One Rust binary for turning agent-facing interfaces into practical tools: serve skills over MCP, use MCP servers from the terminal, and run APIs as CLIs with less adapter code, less prompt bloat, and fewer agent turns.
+One Rust binary for turning agent-facing interfaces into practical tools: serve skills over MCP, use MCP servers from the terminal, run APIs as CLIs, and generate startup-ready AI surfaces from existing CLIs with less adapter code, less prompt bloat, and fewer agent turns.
 
 [Crates.io](https://crates.io/crates/sxmc) | [docs.rs](https://docs.rs/sxmc/latest/sxmc/)
 
@@ -8,21 +8,24 @@ One Rust binary for turning agent-facing interfaces into practical tools: serve 
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external tools and data sources. Today, if you have skills (structured AI instructions), MCP servers, and APIs, each one requires its own adapter, its own client setup, and its own CLI wrapper. There is no single tool that bridges all three.
 
-**sxmc** solves this. One Rust binary to bridge skills, MCP, and APIs so you can reuse the same capabilities across agents, shells, and hosted MCP clients without building separate wrappers for each surface.
+**sxmc** solves this. One Rust binary to bridge skills, MCP, APIs, and startup-facing AI scaffolds so you can reuse the same capabilities across agents, shells, and hosted MCP clients without building separate wrappers for each surface.
 - Turns skill directories into MCP servers (stdio or remote HTTP)
 - Makes MCP tools, prompts, and resources usable from the command line
 - Auto-generates CLI commands from OpenAPI and GraphQL specs
+- Inspects installed CLIs into host-aware profiles, doc blocks, and client config scaffolds
 - Scans skills and MCP servers for security threats
 
 Why that matters:
 - fewer adapters and one installable tool instead of a pile of one-off bridges
 - lower token overhead because MCP discovery and inspection can stay narrow and on demand
 - easier reuse of the same workflows across local agents, hosted MCP clients, and terminal automation
+- startup discoverability without unsafe overwrites because generated docs are preview-first and managed-block based
 
 ```
 Skills  -->  MCP Server     (serve skills to any MCP client)
 MCP Server  -->  CLI        (list MCP surfaces, invoke MCP tools)
 Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
+CLI  -->  AI Surfaces       (profiles, startup docs, and host config scaffolds)
 ```
 
 ## Table of Contents
@@ -35,6 +38,7 @@ Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
   - [Run a skill directly](#run-a-skill-directly)
   - [Any MCP server as CLI](#any-mcp-server-as-cli)
   - [Any API as CLI](#any-api-as-cli)
+  - [Any CLI as AI startup surfaces](#any-cli-as-ai-startup-surfaces)
   - [Security scanning](#security-scanning)
   - [Bake and reuse connections](#bake-and-reuse-connections)
   - [Generate skills from APIs](#generate-skills-from-apis)
@@ -82,6 +86,7 @@ Canonical docs:
 - hosting, release, and distribution: [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 - testing, smoke checks, and compatibility notes: [`docs/VALIDATION.md`](docs/VALIDATION.md)
 - explicit support boundary: [`docs/PRODUCT_CONTRACT.md`](docs/PRODUCT_CONTRACT.md)
+- CLI-to-AI model and write policy: [`docs/CLI_SURFACES.md`](docs/CLI_SURFACES.md)
 
 ## Quick Start
 
@@ -295,6 +300,45 @@ For structured API responses, `--format json|json-pretty|toon` lets you choose
 between compact JSON, pretty JSON, or a Rust-native TOON-style rendering that
 compresses repeated keys in tabular data. `--pretty` remains a shorthand for
 pretty JSON.
+
+### Any CLI as AI startup surfaces
+
+```bash
+# Inspect a real CLI into a normalized profile
+sxmc inspect cli gh --format toon
+
+# Generate startup-facing artifacts for one host profile
+sxmc init ai --from-cli gh --client claude-code --mode preview
+sxmc init ai --from-cli gh --client cursor --mode preview
+
+# Apply a managed block to the real startup-read doc file
+sxmc scaffold agent-doc \
+  --from-profile examples/profiles/from_cli.json \
+  --client claude-code \
+  --mode apply
+
+# Merge a known host config shape when sxmc supports it
+sxmc scaffold client-config \
+  --from-profile examples/profiles/from_cli.json \
+  --client cursor \
+  --mode apply
+```
+
+This shipped slice is intentionally safe:
+
+- `inspect cli` builds the canonical JSON profile for a real command
+- `init ai` generates a profile sidecar, an agent-doc block, and a host config scaffold
+- `preview` and `write-sidecar` are the default review paths
+- `apply` updates managed markdown blocks or mergeable config files only
+- existing `AGENTS.md` / `CLAUDE.md` files are never overwritten wholesale
+
+Current host-aware coverage includes:
+
+- Claude Code
+- Cursor
+- Gemini CLI
+- OpenAI/Codex-style setups
+- generic stdio/http MCP startup scaffolds
 
 ### Security scanning
 

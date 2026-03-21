@@ -45,6 +45,7 @@ High-value scenarios covered in this stack include:
 - `skills create`
 - promptless or resource-less third-party MCP servers
 - zero-argument tool interoperability
+- CLI inspection, startup artifact preview, managed doc apply, and Cursor config merge coverage
 
 ## Compatibility Notes
 
@@ -99,3 +100,10 @@ The current validation posture is:
 **[VALIDATION_RUN_v0.2.0.md](VALIDATION_RUN_v0.2.0.md)** — **0.2.0** pass: tests (**123**), certify + smoke, benchmarks, five skills, five MCPs, **JSON / stderr notes**, promptless multi-invocation, **MCP → CLI**, **`sxmc mcp`**, **`sxmc mcp session`**, **Cursor-style stdio simulation (per USAGE)**, and **warnings inventory**.
 
 Repeated standalone **`sxmc stdio …`** invocations do **not** share MCP session memory. For continuity, use **`sxmc mcp session <server>`** (see validation run §9).
+
+Current CLI-to-AI coverage is automated rather than client-UI-driven:
+
+- `inspect cli` self-guard and self-inspection with `--allow-self`
+- `init ai` preview mode for Claude-style startup docs
+- managed `AGENTS.md` apply without overwriting existing content
+- Cursor MCP config merge behavior

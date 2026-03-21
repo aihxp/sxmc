@@ -3,9 +3,11 @@
 This document turns the `CLI -> AI surfaces` idea into a concrete product model
 for `sxmc`.
 
-Current preview path:
+Current shipped path:
 
 ```bash
+sxmc inspect cli gh --format toon
+sxmc init ai --from-cli gh --client claude-code --mode preview
 sxmc inspect profile examples/profiles/from_cli.json --format toon
 sxmc inspect profile examples/profiles/from_generated_cli.json --pretty
 ```
@@ -163,22 +165,25 @@ inference from observation.
 
 ## Practical Product Shape
 
-If this lands in `sxmc`, the clean command family is:
+The current command family is:
 
 - `sxmc inspect cli <command>`
-- `sxmc scaffold skill --from-profile <file>`
-- `sxmc scaffold mcp --from-profile <file>`
-- `sxmc scaffold agent-doc --from-profile <file>`
+- `sxmc inspect profile <file>`
+- `sxmc init ai --from-cli <command> --client <profile>`
+- `sxmc scaffold agent-doc --from-profile <file> --client <profile>`
+- `sxmc scaffold client-config --from-profile <file> --client <profile>`
 
-This keeps inspection deterministic and generation reviewable.
+This keeps inspection deterministic and generation reviewable while making the
+startup-discovery path explicit.
 
 ## Recommended 1.0 Scope
 
-For a first stable version of this feature, keep the surface narrow:
+Current shipped scope:
 
 - one versioned JSON profile schema
 - one deterministic inspection path
-- one `SKILL.md` scaffold target
-- one agent-doc snippet target
+- one host-aware agent-doc target
+- one host-aware client-config scaffold target
 - provenance on every generated artifact
+- preview/sidecar/patch/apply modes
 - no default mutation of existing repo docs

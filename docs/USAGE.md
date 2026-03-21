@@ -6,6 +6,7 @@ The shortest path through `sxmc` is:
 - `mcp` for daily MCP client work against baked connections
 - `stdio` and `http` for raw or ad hoc MCP bridging
 - `api`, `spec`, and `graphql` for API-to-CLI flows
+- `inspect cli`, `init ai`, and `scaffold` for CLI-to-AI startup artifacts
 
 ## Install
 
@@ -119,6 +120,63 @@ Explicit OpenAPI / GraphQL:
 sxmc spec ./openapi.yaml listPets limit=10
 sxmc graphql https://api.example.com/graphql users limit=5
 ```
+
+## Turn CLIs Into AI Startup Surfaces
+
+Inspect a real CLI:
+
+```bash
+sxmc inspect cli gh --format json-pretty
+sxmc inspect cli gh --format toon
+```
+
+Generate startup-facing artifacts for a host profile:
+
+```bash
+sxmc init ai --from-cli gh --client claude-code --mode preview
+sxmc init ai --from-cli gh --client cursor --mode preview
+```
+
+Generate from an existing saved profile:
+
+```bash
+sxmc scaffold agent-doc \
+  --from-profile examples/profiles/from_cli.json \
+  --client claude-code \
+  --mode preview
+
+sxmc scaffold client-config \
+  --from-profile examples/profiles/from_cli.json \
+  --client cursor \
+  --mode preview
+```
+
+Write modes:
+
+- `preview`
+  - print generated artifacts to stdout
+- `write-sidecar`
+  - write sidecar files under `.sxmc/ai/...`
+- `patch`
+  - show a patch-style preview for apply-capable targets
+- `apply`
+  - update managed markdown blocks or mergeable config files
+
+Safety rules:
+
+- existing `AGENTS.md` / `CLAUDE.md` files are not overwritten wholesale
+- `apply` uses managed `sxmc` blocks for markdown docs
+- JSON MCP configs are merged where the host shape is known
+- `sxmc` refuses to inspect itself unless you pass `--allow-self`
+
+Current host profiles:
+
+- `claude-code`
+- `cursor`
+- `gemini-cli`
+- `openai-codex`
+- `generic-stdio-mcp`
+- `generic-http-mcp`
 
 ## Client Setup Notes
 

@@ -141,6 +141,8 @@ fn test_help() {
         .stdout(predicate::str::contains("mcp"))
         .stdout(predicate::str::contains("api"))
         .stdout(predicate::str::contains("inspect"))
+        .stdout(predicate::str::contains("init"))
+        .stdout(predicate::str::contains("scaffold"))
         .stdout(predicate::str::contains("scan"))
         .stdout(predicate::str::contains("bake"));
 }
@@ -234,6 +236,115 @@ fn test_inspect_profile_json_pretty() {
         .success()
         .stdout(predicate::str::contains("\"profile_schema\":"))
         .stdout(predicate::str::contains("\"generation_depth\": 1"));
+}
+
+#[test]
+fn test_inspect_cli_requires_allow_self_for_sxmc() {
+    sxmc()
+        .args(["inspect", "cli", &sxmc_bin_string()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Refusing to inspect sxmc itself"));
+}
+
+#[test]
+fn test_inspect_cli_self_with_allow_self() {
+    sxmc()
+        .args([
+            "inspect",
+            "cli",
+            &sxmc_bin_string(),
+            "--allow-self",
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"profile_schema\""))
+        .stdout(predicate::str::contains("\"command\": \"sxmc\""))
+        .stdout(predicate::str::contains("\"subcommands\""));
+}
+
+#[test]
+fn test_init_ai_preview_for_claude() {
+    sxmc()
+        .args([
+            "init",
+            "ai",
+            "--from-cli",
+            &sxmc_bin_string(),
+            "--client",
+            "claude-code",
+            "--mode",
+            "preview",
+            "--allow-self",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Target:"))
+        .stdout(predicate::str::contains("CLAUDE.md"))
+        .stdout(predicate::str::contains("sxmc CLI Surface"));
+}
+
+#[test]
+fn test_scaffold_agent_doc_apply_preserves_existing_content() {
+    let temp = tempfile::tempdir().unwrap();
+    let agents = temp.path().join("AGENTS.md");
+    fs::write(&agents, "# Existing\n\nKeep me.\n").unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "agent-doc",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--client",
+            "cursor",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(&agents).unwrap();
+    assert!(contents.contains("Keep me."));
+    assert!(contents.contains("<!-- sxmc:begin cli-ai -->"));
+    assert!(contents.contains("sxmc CLI Surface: `gh`"));
+}
+
+#[test]
+fn test_scaffold_client_config_apply_merges_cursor_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let cursor_dir = temp.path().join(".cursor");
+    fs::create_dir_all(&cursor_dir).unwrap();
+    let config_path = cursor_dir.join("mcp.json");
+    fs::write(
+        &config_path,
+        r#"{"mcpServers":{"existing":{"command":"foo","args":[]}}}"#,
+    )
+    .unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "client-config",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--client",
+            "cursor",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(&config_path).unwrap();
+    assert!(contents.contains("\"existing\""));
+    assert!(contents.contains("\"sxmc-cli-ai-gh\""));
+    assert!(contents.contains("\"command\": \"sxmc\""));
 }
 
 #[test]

@@ -11,4 +11,4 @@ Additional documentation for sxmc developers and maintainers.
 | [VALIDATION_RUN_v0.1.9.md](VALIDATION_RUN_v0.1.9.md) | Prior snapshot for `0.1.9` |
 | [VALIDATION_RUN_v0.1.8.md](VALIDATION_RUN_v0.1.8.md) | Prior snapshot for `0.1.8` |
 | [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md) | Explicit support boundary: what `sxmc` guarantees, degrades gracefully, or leaves out of scope |
-| [CLI_SURFACES.md](CLI_SURFACES.md) | Concrete design for `CLI -> AI surfaces`, including provenance, depth limits, and review/apply rules |
+| [CLI_SURFACES.md](CLI_SURFACES.md) | Shipped `CLI -> AI` model: inspection, host-aware startup artifacts, provenance, depth limits, and review/apply rules |

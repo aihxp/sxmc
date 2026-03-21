@@ -6,6 +6,7 @@ use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt};
 use tokio::process::Command;
 
+use crate::cli_surfaces::parse_command_spec;
 use crate::client::build_call_tool_params;
 use crate::error::{Result, SxmcError};
 
@@ -135,69 +136,6 @@ impl StdioClient {
             .map_err(|e| SxmcError::McpError(format!("Failed to close: {}", e)))?;
         Ok(())
     }
-}
-
-fn parse_command_spec(command: &str) -> Result<Vec<String>> {
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    if trimmed.starts_with('[') {
-        return serde_json::from_str::<Vec<String>>(trimmed).map_err(|e| {
-            SxmcError::Other(format!(
-                "Invalid stdio command JSON array. Expected [\"cmd\", \"arg1\", ...]: {}",
-                e
-            ))
-        });
-    }
-
-    #[cfg(windows)]
-    {
-        if let Some(parts) = parse_windows_command_spec(trimmed) {
-            return Ok(parts);
-        }
-        // Fallback to simple whitespace splitting on Windows to preserve backslashes
-        // (shlex uses POSIX rules which treat backslashes as escape characters)
-        return Ok(trimmed.split_whitespace().map(str::to_string).collect());
-    }
-
-    #[cfg(not(windows))]
-    shlex::split(trimmed).ok_or_else(|| {
-        SxmcError::Other(
-            "Invalid stdio command string. Use shell-style quoting or a JSON array command spec."
-                .into(),
-        )
-    })
-}
-
-#[cfg(windows)]
-fn parse_windows_command_spec(command: &str) -> Option<Vec<String>> {
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return Some(Vec::new());
-    }
-
-    if let Some(rest) = trimmed.strip_prefix('"') {
-        let quote_end = rest.find('"')?;
-        let executable = &rest[..quote_end];
-        let args = rest[quote_end + 1..].trim();
-        let mut parts = vec![executable.to_string()];
-        parts.extend(args.split_whitespace().map(str::to_string));
-        return Some(parts);
-    }
-
-    let executable_pattern =
-        regex::Regex::new(r"(?i)^(.+?\.(exe|cmd|bat|ps1))(?:\s+(.*))?$").ok()?;
-    let captures = executable_pattern.captures(trimmed)?;
-    let executable = captures.get(1)?.as_str();
-    let mut parts = vec![executable.to_string()];
-
-    if let Some(args) = captures.get(3) {
-        parts.extend(args.as_str().split_whitespace().map(str::to_string));
-    }
-
-    Some(parts)
 }
 
 #[cfg(test)]

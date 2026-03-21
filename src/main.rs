@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use sxmc::auth::secrets::{resolve_header, resolve_secret};
 use sxmc::bake::config::SourceType;
 use sxmc::bake::{BakeConfig, BakeStore};
+use sxmc::cli_surfaces::{self, AiClientProfile, ArtifactMode};
 use sxmc::client::{api, graphql, mcp_http, mcp_stdio, openapi};
 use sxmc::error::Result;
 use sxmc::output;
@@ -330,6 +331,18 @@ enum Commands {
         action: InspectAction,
     },
 
+    /// Initialize startup-facing AI artifacts from an inspected CLI
+    Init {
+        #[command(subcommand)]
+        action: InitAction,
+    },
+
+    /// Generate AI-facing scaffolds from an existing CLI surface profile
+    Scaffold {
+        #[command(subcommand)]
+        action: ScaffoldAction,
+    },
+
     /// Manage baked connection configs
     Bake {
         #[command(subcommand)]
@@ -399,6 +412,25 @@ enum BakeAction {
 
 #[derive(Subcommand)]
 enum InspectAction {
+    /// Inspect a real CLI into a normalized profile
+    Cli {
+        /// Command spec to inspect.
+        /// Supports shell-style quoting or a JSON array like ["gh"].
+        command: String,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format for the profile
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// Allow inspecting sxmc itself
+        #[arg(long)]
+        allow_self: bool,
+    },
+
     /// Render a CLI surface profile from JSON
     Profile {
         /// Path to a JSON profile file
@@ -411,6 +443,82 @@ enum InspectAction {
         /// Structured output format for the profile
         #[arg(long, value_enum)]
         format: Option<output::StructuredOutputFormat>,
+    },
+}
+
+#[derive(Subcommand)]
+enum InitAction {
+    /// Inspect a CLI and generate startup-facing AI artifacts for one host profile
+    Ai {
+        /// Command spec to inspect.
+        /// Supports shell-style quoting or a JSON array like ["gh"].
+        #[arg(long = "from-cli")]
+        from_cli: String,
+
+        /// Target host/client profile
+        #[arg(long, value_enum)]
+        client: AiClientProfile,
+
+        /// Skills path to embed in generated host configs
+        #[arg(long, default_value = ".claude/skills")]
+        skills_path: PathBuf,
+
+        /// Root directory for generated or applied artifacts
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Output mode
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: ArtifactMode,
+
+        /// Allow inspecting sxmc itself
+        #[arg(long)]
+        allow_self: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScaffoldAction {
+    /// Generate an agent-doc snippet/block from a CLI surface profile
+    AgentDoc {
+        /// Path to a JSON profile file
+        #[arg(long = "from-profile")]
+        from_profile: PathBuf,
+
+        /// Target host/client profile
+        #[arg(long, value_enum)]
+        client: AiClientProfile,
+
+        /// Root directory for generated or applied artifacts
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Output mode
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: ArtifactMode,
+    },
+
+    /// Generate a host-specific client config scaffold from a CLI surface profile
+    ClientConfig {
+        /// Path to a JSON profile file
+        #[arg(long = "from-profile")]
+        from_profile: PathBuf,
+
+        /// Target host/client profile
+        #[arg(long, value_enum)]
+        client: AiClientProfile,
+
+        /// Skills path to embed in generated host configs
+        #[arg(long, default_value = ".claude/skills")]
+        skills_path: PathBuf,
+
+        /// Root directory for generated or applied artifacts
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Output mode
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: ArtifactMode,
     },
 }
 
@@ -1513,6 +1621,32 @@ fn parse_source_type(source_type: &str) -> SourceType {
     }
 }
 
+fn resolve_generation_root(root: Option<PathBuf>) -> Result<PathBuf> {
+    match root {
+        Some(path) => Ok(path),
+        None => std::env::current_dir().map_err(Into::into),
+    }
+}
+
+fn print_write_outcomes(outcomes: &[cli_surfaces::WriteOutcome]) {
+    for outcome in outcomes {
+        match outcome.mode {
+            ArtifactMode::Preview => {}
+            ArtifactMode::WriteSidecar => {
+                println!(
+                    "Wrote sidecar for {}: {}",
+                    outcome.label,
+                    outcome.path.display()
+                );
+            }
+            ArtifactMode::Patch => {}
+            ArtifactMode::Apply => {
+                println!("Updated {}: {}", outcome.label, outcome.path.display());
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -2004,6 +2138,17 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Inspect { action } => match action {
+            InspectAction::Cli {
+                command,
+                pretty,
+                format,
+                allow_self,
+            } => {
+                let profile = cli_surfaces::inspect_cli(&command, allow_self)?;
+                let value = cli_surfaces::profile_value(&profile);
+                let format = output::resolve_structured_format(format, pretty);
+                println!("{}", output::format_structured_value(&value, format));
+            }
             InspectAction::Profile {
                 input,
                 pretty,
@@ -2013,6 +2158,67 @@ async fn main() -> anyhow::Result<()> {
                 let value: Value = serde_json::from_str(&raw)?;
                 let format = output::resolve_structured_format(format, pretty);
                 println!("{}", output::format_structured_value(&value, format));
+            }
+        },
+
+        Commands::Init { action } => match action {
+            InitAction::Ai {
+                from_cli,
+                client,
+                skills_path,
+                root,
+                mode,
+                allow_self,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let profile = cli_surfaces::inspect_cli(&from_cli, allow_self)?;
+                let profile_artifact = cli_surfaces::generate_profile_artifact(&profile, &root)?;
+                let agent_doc = cli_surfaces::generate_agent_doc_artifact(&profile, client, &root);
+                let client_config = cli_surfaces::generate_client_config_artifact(
+                    &profile,
+                    client,
+                    &root,
+                    &skills_path,
+                );
+                let artifacts = vec![profile_artifact, agent_doc, client_config];
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&artifacts, client, mode, &root)?;
+                print_write_outcomes(&outcomes);
+            }
+        },
+
+        Commands::Scaffold { action } => match action {
+            ScaffoldAction::AgentDoc {
+                from_profile,
+                client,
+                root,
+                mode,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let profile = cli_surfaces::load_profile(&from_profile)?;
+                let artifact = cli_surfaces::generate_agent_doc_artifact(&profile, client, &root);
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&[artifact], client, mode, &root)?;
+                print_write_outcomes(&outcomes);
+            }
+            ScaffoldAction::ClientConfig {
+                from_profile,
+                client,
+                skills_path,
+                root,
+                mode,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let profile = cli_surfaces::load_profile(&from_profile)?;
+                let artifact = cli_surfaces::generate_client_config_artifact(
+                    &profile,
+                    client,
+                    &root,
+                    &skills_path,
+                );
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&[artifact], client, mode, &root)?;
+                print_write_outcomes(&outcomes);
             }
         },
 

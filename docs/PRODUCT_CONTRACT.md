@@ -49,6 +49,22 @@ These are the core product paths we should treat as stable:
 - `/healthz` is supported for hosted deployments
 - bearer-token and required-header auth are supported for remote MCP hosting
 
+### 5. CLI -> AI Startup Surfaces
+
+- `sxmc inspect cli <command>` is supported for deterministic help-based inspection
+- `sxmc init ai --from-cli <command> --client <profile>` is supported for generating startup-facing artifacts
+- `sxmc scaffold agent-doc --from-profile ...` is supported
+- `sxmc scaffold client-config --from-profile ...` is supported
+- host profiles are supported for:
+  - `claude-code`
+  - `cursor`
+  - `gemini-cli`
+  - `openai-codex`
+  - `generic-stdio-mcp`
+  - `generic-http-mcp`
+- preview, sidecar, patch, and apply modes are supported
+- apply mode updates managed markdown blocks or mergeable config files only
+
 ## Should Fail Gracefully
 
 These scenarios should not crash the product or produce misleading results:
@@ -58,6 +74,7 @@ These scenarios should not crash the product or produce misleading results:
 - startup-only invocations like `sxmc --version` and `sxmc --help` should succeed on all supported platforms
 - unsupported optional MCP surfaces should be skipped with a clear note rather than failing all discovery
 - `scan` should continue to use non-zero exit status for findings by design, but not be treated as a crash
+- existing `AGENTS.md` / `CLAUDE.md` files should not be overwritten wholesale by CLI->AI generation
 
 ## Explicitly Outside The Contract
 
@@ -68,6 +85,7 @@ These are not promised as current product behavior:
 - automated CI launch of proprietary clients like Cursor, Codex, or Claude Code
 - universal compatibility with every third-party MCP server without caveats
 - benchmark numbers as proof of broad client compatibility
+- fully automatic client startup discovery without either a real config file or a real startup-read doc file
 
 ## Release Bar
 

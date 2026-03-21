@@ -12,6 +12,8 @@
 //! - **MCP server → CLI** — turn any MCP server into command-line tools
 //! - **API → CLI** — auto-detect OpenAPI or GraphQL specs and execute operations
 //!   with JSON or TOON-style structured output
+//! - **CLI → AI surfaces** — inspect a real CLI into a normalized profile, then
+//!   generate startup-facing docs and host config scaffolds
 //!
 //! The crate powers the `sxmc` binary, but it also exposes the building blocks
 //! that the CLI uses internally. That makes it useful if you want to embed
@@ -39,6 +41,7 @@
 //! - [`skills`] discovers and parses skills
 //! - [`server`] turns parsed skills into an MCP server
 //! - [`client`] connects to MCP, OpenAPI, and GraphQL sources
+//! - [`cli_surfaces`] inspects CLIs and generates startup-facing AI artifacts
 //! - [`security`] scans skills and MCP surfaces for common risks
 //! - [`bake`] stores reusable connection definitions
 //! - [`auth`] resolves secrets from environment variables and files
@@ -53,6 +56,7 @@
 //! sxmc http http://127.0.0.1:8000/mcp --list
 //! sxmc api ./openapi.json --list
 //! sxmc scan --paths ./skills
+//! sxmc inspect cli gh --format toon
 //! ```
 //!
 //! # Embedding in Rust
@@ -97,6 +101,8 @@ pub mod auth;
 pub mod bake;
 /// Lightweight filesystem cache utilities.
 pub mod cache;
+/// CLI inspection and CLI->AI surface generation helpers.
+pub mod cli_surfaces;
 /// MCP, OpenAPI, and GraphQL client adapters.
 pub mod client;
 /// Shared error types used across the crate.
