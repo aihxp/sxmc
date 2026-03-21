@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/aihxp/sxmc/schemas/sxmc_cli_surface_profile_v1.schema.json",
+  "$id": "https://github.com/aihxp/sxmc/schemas/cli_surface_v1.schema.json",
   "title": "sxmc_cli_surface_profile_v1",
   "type": "object",
   "required": [
