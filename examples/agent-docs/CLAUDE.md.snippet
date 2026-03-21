@@ -8,6 +8,7 @@ Use this sequence:
 2. `sxmc mcp grep <pattern>` or `sxmc mcp tools <server> --limit 10`
 3. `sxmc mcp info <server/tool> --format toon`
 4. `sxmc mcp call <server/tool> '<json-object>'`
+5. `sxmc mcp session <server>` when the tool expects multi-step state
 
 Other surfaces:
 
@@ -19,3 +20,4 @@ Token-saving guidance:
 - inspect one tool at a time
 - avoid broad `--describe` output unless needed
 - pipe large JSON through `jq` or files instead of pasting full results into chat
+- parse stdout only if you need machine-readable output; informational `[sxmc]` lines stay on stderr

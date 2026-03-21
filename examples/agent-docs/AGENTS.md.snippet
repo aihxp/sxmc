@@ -9,9 +9,11 @@ Recommended flow:
 3. Inspect one tool before calling it with `sxmc mcp info <server/tool> --format toon`.
 4. Call the tool with `sxmc mcp call <server/tool> '<json-object>'`.
 5. Use `sxmc mcp prompt <server/prompt> ...` and `sxmc mcp read <server/resource-uri>` for prompt/resource access.
+6. If the MCP server expects multi-step memory, use `sxmc mcp session <server>` instead of repeated one-shot calls.
 
 Keep large structured output out of chat when possible:
 
 - pipe JSON to `jq`
 - redirect bulky output to files
 - fetch schema/details only for the specific tool you need
+- treat stdout as the machine-readable stream; informational `[sxmc]` lines are on stderr

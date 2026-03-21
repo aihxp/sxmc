@@ -257,4 +257,6 @@ teaching agents this pattern:
 1. search or list first
 2. inspect one tool with `sxmc mcp info`
 3. call one tool with `sxmc mcp call`
-4. keep large output in files or pipes instead of pasting it into context
+4. use `sxmc mcp session <server>` when a tool expects multi-step state
+5. keep large output in files or pipes instead of pasting it into context
+6. parse stdout only for machine-readable output; informational `[sxmc]` lines go to stderr

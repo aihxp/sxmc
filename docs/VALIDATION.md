@@ -174,6 +174,33 @@ These numbers are best read as workflow-efficiency estimates, not billing-grade
 measurements. The stable product lesson is the same: `sxmc` helps most when it
 replaces protocol glue, spec-reading, or multi-step discovery flows.
 
+## Why Manual JSON-RPC Retries Happen
+
+The retry multiplier in manual MCP flows usually comes from a small set of
+failure classes:
+
+- capability assumptions:
+  - prompt-less or resource-less servers return `-32601` / "method not found" when a hand-built client assumes every surface exists
+- argument-shape mismatches:
+  - some servers require `arguments: {}` even for zero-arg tools, or reject calls until the exact schema is followed
+- stateful workflow assumptions:
+  - repeated fresh stdio invocations do not share MCP session memory
+- stdout/stderr mixing:
+  - machine parsing fails when informational stderr lines are concatenated with structured stdout
+- quoting and command spawning:
+  - ad hoc shell-wrapped JSON-RPC scripts are brittle around nested JSON and platform-specific command parsing
+
+The intended `sxmc` recovery path is:
+
+1. `sxmc mcp grep <pattern>` or `sxmc mcp tools <server> --limit 10`
+2. `sxmc mcp info <server/tool> --format toon`
+3. `sxmc mcp call <server/tool> '<json-object>'`
+4. `sxmc mcp session <server>` when continuity matters
+
+Recent CLI behavior also points failed tool calls back toward schema inspection
+and session mode so agents can recover in one turn instead of rediscovering the
+failure mode from raw JSON-RPC errors.
+
 ## Startup Sanity
 
 Quick startup checks:

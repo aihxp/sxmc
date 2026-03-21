@@ -1069,6 +1069,52 @@ fn parse_json_object_arg(
     })
 }
 
+fn looks_like_argument_shape_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("invalid params")
+        || lower.contains("validation")
+        || lower.contains("expected object")
+        || lower.contains("missing required")
+        || lower.contains("required property")
+        || lower.contains("schema")
+}
+
+fn annotate_mcp_tool_call_error(
+    error: sxmc::error::SxmcError,
+    inspect_hint: &str,
+    session_hint: Option<&str>,
+) -> sxmc::error::SxmcError {
+    let message = match error {
+        sxmc::error::SxmcError::McpError(message) => message,
+        sxmc::error::SxmcError::Other(message) => message,
+        other => return other,
+    };
+
+    let mut notes = Vec::new();
+    if looks_like_argument_shape_error(&message) {
+        notes.push(format!(
+            "Inspect the tool schema first with `{}`.",
+            inspect_hint
+        ));
+    }
+    if let Some(session_hint) = session_hint {
+        notes.push(format!(
+            "If the tool expects multi-step state, use `{}` instead of repeated one-shot calls.",
+            session_hint
+        ));
+    }
+    notes.push(
+        "When machine-parsing structured output, consume stdout only; informational `[sxmc]` lines are written to stderr."
+            .into(),
+    );
+
+    sxmc::error::SxmcError::Other(format!(
+        "{}\n\nRecovery hints:\n- {}",
+        message,
+        notes.join("\n- ")
+    ))
+}
+
 fn parse_optional_kv_args(args: &[String]) -> Option<serde_json::Map<String, serde_json::Value>> {
     let arguments = parse_kv_args(args);
     if arguments.is_empty() {
@@ -1443,7 +1489,16 @@ async fn run_mcp_bridge_command(
             output::format_resource_result(&result, request.pretty)
         );
     } else if let Some(name) = tool_name {
-        let result = client.call_tool(name, parse_kv_args(tool_args)).await?;
+        let result = client
+            .call_tool(name, parse_kv_args(tool_args))
+            .await
+            .map_err(|error| {
+                annotate_mcp_tool_call_error(
+                    error,
+                    &format!("sxmc ... --describe-tool {}", name),
+                    None,
+                )
+            })?;
         println!("{}", output::format_tool_result(&result, request.pretty));
     } else {
         eprintln!("Specify a tool name, --prompt, --resource, or use --list");
@@ -1554,9 +1609,14 @@ async fn call_mcp_tool(
     tool_name: &str,
     payload: Option<String>,
     pretty: bool,
+    inspect_hint: &str,
+    session_hint: Option<&str>,
 ) -> Result<()> {
     let arguments = parse_json_object_arg(payload)?;
-    let result = client.call_tool(tool_name, arguments).await?;
+    let result = client
+        .call_tool(tool_name, arguments)
+        .await
+        .map_err(|error| annotate_mcp_tool_call_error(error, inspect_hint, session_hint))?;
     println!("{}", output::format_tool_result(&result, pretty));
     Ok(())
 }
@@ -1641,7 +1701,17 @@ async fn execute_mcp_session_action(
             tool,
             payload,
             pretty,
-        } => call_mcp_tool(client, &tool, payload, pretty).await,
+        } => {
+            call_mcp_tool(
+                client,
+                &tool,
+                payload,
+                pretty,
+                &format!("info {} --format toon", tool),
+                Some("sxmc mcp session <server>"),
+            )
+            .await
+        }
         McpSessionAction::Read { resource, pretty } => {
             read_mcp_resource(client, &resource, pretty).await
         }
@@ -2149,7 +2219,15 @@ async fn main() -> anyhow::Result<()> {
             } => {
                 let (server, tool_name) = split_server_target(&target)?;
                 let client = connect_named_baked_mcp_client(server).await?;
-                let result = call_mcp_tool(&client, tool_name, payload, pretty).await;
+                let result = call_mcp_tool(
+                    &client,
+                    tool_name,
+                    payload,
+                    pretty,
+                    &format!("sxmc mcp info {}/{} --format toon", server, tool_name),
+                    Some(&format!("sxmc mcp session {}", server)),
+                )
+                .await;
                 finish_connected_mcp_client(client, result).await?;
             }
             McpAction::Read { target, pretty } => {
@@ -2765,7 +2843,10 @@ async fn cmd_api(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_capability_not_supported, list_optional_surface, McpSurface};
+    use super::{
+        annotate_mcp_tool_call_error, is_capability_not_supported, list_optional_surface,
+        looks_like_argument_shape_error, McpSurface,
+    };
     use sxmc::error::SxmcError;
 
     #[test]
@@ -2786,6 +2867,33 @@ mod tests {
     fn does_not_hide_real_failures() {
         let error = SxmcError::McpError("list_prompts failed: connection reset".into());
         assert!(!is_capability_not_supported(&error));
+    }
+
+    #[test]
+    fn detects_argument_shape_errors() {
+        assert!(looks_like_argument_shape_error(
+            "call_tool failed: invalid params: expected object"
+        ));
+        assert!(looks_like_argument_shape_error(
+            "call_tool failed: validation error: missing required property"
+        ));
+        assert!(!looks_like_argument_shape_error(
+            "call_tool failed: connection reset"
+        ));
+    }
+
+    #[test]
+    fn tool_call_errors_include_recovery_hints() {
+        let error = annotate_mcp_tool_call_error(
+            SxmcError::McpError("call_tool failed: invalid params: expected object".into()),
+            "sxmc mcp info demo/tool --format toon",
+            Some("sxmc mcp session demo"),
+        );
+        let rendered = error.to_string();
+        assert!(rendered.contains("Recovery hints:"));
+        assert!(rendered.contains("sxmc mcp info demo/tool --format toon"));
+        assert!(rendered.contains("sxmc mcp session demo"));
+        assert!(rendered.contains("stdout only"));
     }
 
     #[tokio::test]
