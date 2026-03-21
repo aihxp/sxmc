@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `CLI -> AI` startup scaffolds with:
+  - `sxmc inspect cli <command>`
+  - `sxmc init ai --from-cli <command> --client <profile>`
+  - `sxmc scaffold skill --from-profile ...`
+  - `sxmc scaffold agent-doc --from-profile ...`
+  - `sxmc scaffold client-config --from-profile ...`
+  - `sxmc scaffold mcp-wrapper --from-profile ...`
+  - `sxmc scaffold llms-txt --from-profile ...`
+- full-coverage CLI-to-AI generation with `--coverage full` plus explicit `--host` selection for safe apply behavior
+- native host targets for:
+  - Claude Code
+  - Cursor
+  - Gemini CLI
+  - GitHub Copilot
+  - Continue
+  - OpenCode
+  - JetBrains AI Assistant
+  - Junie
+  - Windsurf
+- dedicated CLI-to-AI compatibility matrix in `docs/CLI_TO_AI_COMPATIBILITY.md`
+
+### Changed
+
+- CLI-to-AI apply mode now updates only explicitly selected host targets during full-coverage runs and sidecars the rest
+- OpenCode config generation now uses its native JSON shape
+- release and usage docs now describe the broader CLI-to-AI host coverage and optional `llms.txt` export
+
 ## [0.2.0] - 2026-03-21
 
 ### Added
