@@ -109,6 +109,7 @@ Current CLI-to-AI coverage is automated rather than client-UI-driven:
 - Cursor MCP config merge behavior
 - Gemini-native `GEMINI.md` apply behavior
 - GitHub Copilot native instructions generation
+- Continue / Junie / Windsurf native doc generation
 - optional `llms.txt` export generation
 
 See [CLI_TO_AI_COMPATIBILITY.md](CLI_TO_AI_COMPATIBILITY.md) for the maintained

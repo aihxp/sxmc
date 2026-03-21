@@ -306,6 +306,9 @@ fn test_init_ai_full_preview_lists_multi_host_targets() {
         .stdout(predicate::str::contains(".cursor/rules/sxmc-cli-ai.md"))
         .stdout(predicate::str::contains("GEMINI.md"))
         .stdout(predicate::str::contains(".github/copilot-instructions.md"))
+        .stdout(predicate::str::contains(".continue/rules/sxmc-cli-ai.md"))
+        .stdout(predicate::str::contains(".junie/guidelines.md"))
+        .stdout(predicate::str::contains(".windsurf/rules/sxmc-cli-ai.md"))
         .stdout(predicate::str::contains(".cursor/mcp.json"))
         .stdout(predicate::str::contains(".gemini/settings.json"))
         .stdout(predicate::str::contains(".codex/mcp.toml"));
@@ -366,6 +369,18 @@ fn test_init_ai_full_apply_updates_selected_hosts_and_sidecars_rest() {
     assert!(temp
         .path()
         .join(".sxmc/ai/github-copilot/copilot-instructions.md.sxmc.snippet")
+        .exists());
+    assert!(temp
+        .path()
+        .join(".sxmc/ai/continue/sxmc-cli-ai.md.sxmc.snippet")
+        .exists());
+    assert!(temp
+        .path()
+        .join(".sxmc/ai/junie/guidelines.md.sxmc.snippet")
+        .exists());
+    assert!(temp
+        .path()
+        .join(".sxmc/ai/windsurf/sxmc-cli-ai.md.sxmc.snippet")
         .exists());
     assert!(temp
         .path()
@@ -450,6 +465,78 @@ fn test_scaffold_agent_doc_apply_for_github_copilot_writes_native_instructions()
         .success();
 
     let contents = fs::read_to_string(temp.path().join(".github/copilot-instructions.md")).unwrap();
+    assert!(contents.contains("sxmc CLI Surface: `gh`"));
+}
+
+#[test]
+fn test_scaffold_agent_doc_apply_for_continue_writes_rules_doc() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "agent-doc",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--client",
+            "continue-dev",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(temp.path().join(".continue/rules/sxmc-cli-ai.md")).unwrap();
+    assert!(contents.contains("sxmc CLI Surface: `gh`"));
+}
+
+#[test]
+fn test_scaffold_agent_doc_apply_for_junie_writes_guidelines() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "agent-doc",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--client",
+            "junie",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(temp.path().join(".junie/guidelines.md")).unwrap();
+    assert!(contents.contains("sxmc CLI Surface: `gh`"));
+}
+
+#[test]
+fn test_scaffold_agent_doc_apply_for_windsurf_writes_rules_doc() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "agent-doc",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--client",
+            "windsurf",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(temp.path().join(".windsurf/rules/sxmc-cli-ai.md")).unwrap();
     assert!(contents.contains("sxmc CLI Surface: `gh`"));
 }
 

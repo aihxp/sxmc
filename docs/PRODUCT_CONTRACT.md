@@ -64,6 +64,9 @@ These are the core product paths we should treat as stable:
   - `cursor`
   - `gemini-cli`
   - `github-copilot`
+  - `continue-dev`
+  - `junie`
+  - `windsurf`
   - `openai-codex`
   - `generic-stdio-mcp`
   - `generic-http-mcp`

@@ -364,6 +364,9 @@ Current host-aware coverage includes:
 - Cursor
 - Gemini CLI
 - GitHub Copilot
+- Continue
+- Junie
+- Windsurf
 - OpenAI/Codex-style setups
 - generic stdio/http MCP startup scaffolds
 
