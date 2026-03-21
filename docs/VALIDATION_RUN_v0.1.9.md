@@ -16,9 +16,9 @@ Maintainer pass: **automated tests**, **`certify_release.sh`**, **`smoke_real_wo
 |-------|------:|:------:|
 | Library unit tests | **70** | pass |
 | `src/main.rs` unit tests | **5** | pass |
-| `tests/cli_integration.rs` | **45** | pass |
+| `tests/cli_integration.rs` | **47** | pass |
 | Doc tests | **1** | pass |
-| **Total** | **121** | **pass** |
+| **Total** | **123** | **pass** |
 
 Includes **`test_mcp_session_preserves_stateful_tool_memory`** (Python `stateful_mcp_server.py` fixture).
 
@@ -86,12 +86,11 @@ Parsed with **`python3`** (`json.load` or first `JSONDecoder().raw_decode` where
 | Command | Result |
 |---------|--------|
 | `sxmc skills list --paths tests/fixtures --json` | Single JSON document — **OK** |
-| `sxmc scan --paths tests/fixtures --json` | First JSON object has keys `findings`, `summary`, `target` — **OK** (stream may include trailing text; use first decode for strict tooling) |
+| `sxmc scan --paths tests/fixtures --json` | Single JSON document — **OK** (`reports` array when scanning multiple targets) |
 | `sxmc stdio "…serve…" --describe --format json` | Single JSON — **OK** |
 | `sxmc mcp info <bake>/get_skill_details --format json` (temp bake) | Single JSON — **OK** |
+| `sxmc api <petstore> --list --format json` | Single JSON document — **OK** |
 | `sxmc api <petstore> findPetsByStatus status=available --format json` | Response body JSON — **OK** |
-
-**Caveat:** `sxmc api … --list` prints a **human operations list** to stdout (with `[sxmc] Detected…` on stderr). For **JSON**, call a **specific operation** with `--format json`, not `--list` alone.
 
 ---
 
@@ -130,7 +129,7 @@ stdin:
 | Area | Verdict |
 |------|---------|
 | **Tests + certify + smoke** | **Yes** — aligned with [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md) |
-| **JSON where advertised** | **Yes** for `skills list --json`, `scan --json`, `describe --format json`, `mcp info --format json`, `api … call --format json` |
+| **JSON where advertised** | **Yes** for `skills list --json`, `scan --json`, `describe --format json`, `mcp info --format json`, `api --list --format json`, and `api … call --format json` |
 | **Stateful MCP** | **Yes** — `mcp session` demonstrated with fixture server |
 | **Performance** | Benchmarks **only** for regression sanity |
 

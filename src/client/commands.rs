@@ -1,7 +1,8 @@
+use serde::Serialize;
 use serde_json::Value;
 
 /// A CLI command derived from an MCP tool, OpenAPI endpoint, or GraphQL operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CommandDef {
     pub name: String,
     pub description: String,
@@ -9,7 +10,7 @@ pub struct CommandDef {
 }
 
 /// A parameter for a command.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ParamDef {
     pub name: String,
     pub description: String,
@@ -18,7 +19,8 @@ pub struct ParamDef {
     pub default: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ParamType {
     String,
     Integer,

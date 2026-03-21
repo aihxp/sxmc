@@ -285,6 +285,15 @@ fn test_scan_json_output() {
 }
 
 #[test]
+fn test_scan_json_output_is_single_document_for_multiple_targets() {
+    let stdout = command_stdout(&["scan", "--paths", "tests/fixtures", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert!(value.get("reports").is_some());
+    assert_eq!(value["count"].as_u64(), Some(4));
+}
+
+#[test]
 fn test_scan_severity_filter() {
     sxmc()
         .args([
@@ -1137,6 +1146,60 @@ async fn test_api_autodetect_openapi_local_list_and_call() {
         .success()
         .stdout(predicate::str::contains("pets[2]{id,name}:"))
         .stdout(predicate::str::contains(r#"  1,"Mochi""#));
+
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_api_list_supports_json_output() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let spec = serde_json::json!({
+        "openapi": "3.0.0",
+        "info": { "title": "Local Pets", "version": "1.0.0" },
+        "servers": [{ "url": format!("http://{addr}") }],
+        "paths": {
+            "/pets": {
+                "get": {
+                    "operationId": "listPets",
+                    "summary": "List pets",
+                    "parameters": [
+                        { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+                    ],
+                    "responses": { "200": { "description": "ok" } }
+                }
+            }
+        }
+    });
+    let spec_clone = spec.clone();
+    let handle = tokio::spawn(async move {
+        let app = Router::new().route(
+            "/openapi.json",
+            get(move || {
+                let spec = spec_clone.clone();
+                async move { Json(spec) }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let base = format!("http://{addr}/openapi.json");
+    let output = ProcessCommand::new(sxmc_bin_string())
+        .args(["api", &base, "--list", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "command failed: {}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("api --list should emit JSON");
+    assert_eq!(value["api_type"], "OpenAPI");
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["operations"][0]["name"], "listPets");
 
     handle.abort();
 }

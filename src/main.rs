@@ -1953,22 +1953,39 @@ async fn main() -> anyhow::Result<()> {
 
             // Output results
             let mut exit_code = 0;
-            for report in &reports {
-                let filtered_report = report.filtered(min_severity);
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&filtered_report.format_json())?
-                    );
-                } else if filtered_report.is_clean() {
-                    println!(
-                        "[PASS] {} — no issues at severity >= {}",
-                        report.target, severity
-                    );
+            if json {
+                let rendered_reports: Vec<Value> = reports
+                    .iter()
+                    .map(|report| report.filtered(min_severity).format_json())
+                    .collect();
+
+                let json_value = if rendered_reports.len() == 1 {
+                    rendered_reports
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| json!({}))
                 } else {
-                    println!("{}", filtered_report.format_text());
-                    if filtered_report.has_errors() {
-                        exit_code = 1;
+                    json!({
+                        "severity": severity,
+                        "count": rendered_reports.len(),
+                        "reports": rendered_reports,
+                    })
+                };
+
+                println!("{}", serde_json::to_string_pretty(&json_value)?);
+            } else {
+                for report in &reports {
+                    let filtered_report = report.filtered(min_severity);
+                    if filtered_report.is_clean() {
+                        println!(
+                            "[PASS] {} — no issues at severity >= {}",
+                            report.target, severity
+                        );
+                    } else {
+                        println!("{}", filtered_report.format_text());
+                        if filtered_report.has_errors() {
+                            exit_code = 1;
+                        }
                     }
                 }
             }
@@ -2223,7 +2240,15 @@ async fn cmd_api(
     format: Option<output::StructuredOutputFormat>,
 ) -> anyhow::Result<()> {
     if list || search.is_some() {
-        println!("{}", client.format_list(search));
+        if format.is_some() || pretty {
+            let format = output::resolve_structured_format(format, pretty);
+            println!(
+                "{}",
+                output::format_structured_value(&client.list_value(search), format)
+            );
+        } else {
+            println!("{}", client.format_list(search));
+        }
     } else if let Some(op_name) = operation {
         let arguments = parse_string_kv_args(args);
         let result = client.execute(&op_name, &arguments).await?;

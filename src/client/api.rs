@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::client::commands::CommandDef;
 use crate::client::graphql;
@@ -65,6 +65,30 @@ impl ApiClient {
                 graphql::format_graphql_list(&ops, None)
             }
         }
+    }
+
+    /// Return a structured listing of available operations.
+    pub fn list_value(&self, search: Option<&str>) -> Value {
+        let pattern = search.map(str::to_lowercase);
+        let commands: Vec<CommandDef> = self
+            .commands()
+            .into_iter()
+            .filter(|cmd| {
+                if let Some(pattern) = &pattern {
+                    cmd.name.to_lowercase().contains(pattern)
+                        || cmd.description.to_lowercase().contains(pattern)
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        json!({
+            "api_type": self.api_type(),
+            "search": search,
+            "count": commands.len(),
+            "operations": commands,
+        })
     }
 
     /// Get the API type label.

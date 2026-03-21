@@ -95,6 +95,6 @@ The current validation posture is:
 
 ## Latest maintainer snapshot
 
-**[VALIDATION_RUN_v0.1.9.md](VALIDATION_RUN_v0.1.9.md)** — **v0.1.9** pass: tests (**121**), certify + smoke, benchmarks, five skills, five MCPs, **JSON output checks**, promptless multi-invocation, **MCP → CLI**, **`sxmc mcp`** workflow, and manual **`sxmc mcp session`** stateful proof (fixture server).
+**[VALIDATION_RUN_v0.1.9.md](VALIDATION_RUN_v0.1.9.md)** — **v0.1.9** pass: tests (**123**), certify + smoke, benchmarks, five skills, five MCPs, **JSON output checks**, promptless multi-invocation, **MCP → CLI**, **`sxmc mcp`** workflow, and manual **`sxmc mcp session`** stateful proof (fixture server).
 
 Repeated standalone **`sxmc stdio …`** invocations still do **not** share MCP session memory. For continuity, use **`sxmc mcp session <server>`** (see validation doc §10).
