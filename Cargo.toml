@@ -2,7 +2,7 @@
 name = "sxmc"
 version = "0.1.8"
 edition = "2021"
-description = "Turn skills into MCP servers, MCP servers into CLI commands, and any OpenAPI/GraphQL API into a CLI — one Rust binary"
+description = "One Rust binary to bridge skills, MCP, and APIs into reusable agent, terminal, and automation workflows"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/aihxp/sxmc"

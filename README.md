@@ -1,6 +1,6 @@
 # sxmc
 
-One Rust binary. Skills become MCP servers. MCP servers become CLI commands. Any API becomes a CLI.
+One Rust binary for turning agent-facing interfaces into practical tools: serve skills over MCP, use MCP servers from the terminal, and run APIs as CLIs with less adapter code, less prompt bloat, and fewer agent turns.
 
 [Crates.io](https://crates.io/crates/sxmc) | [docs.rs](https://docs.rs/sxmc/latest/sxmc/)
 
@@ -8,11 +8,16 @@ One Rust binary. Skills become MCP servers. MCP servers become CLI commands. Any
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) is an open standard for connecting AI assistants to external tools and data sources. Today, if you have skills (structured AI instructions), MCP servers, and APIs, each one requires its own adapter, its own client setup, and its own CLI wrapper. There is no single tool that bridges all three.
 
-**sxmc** solves this. One Rust binary that:
+**sxmc** solves this. One Rust binary to bridge skills, MCP, and APIs so you can reuse the same capabilities across agents, shells, and hosted MCP clients without building separate wrappers for each surface.
 - Turns skill directories into MCP servers (stdio or remote HTTP)
 - Makes MCP tools, prompts, and resources usable from the command line
 - Auto-generates CLI commands from OpenAPI and GraphQL specs
 - Scans skills and MCP servers for security threats
+
+Why that matters:
+- fewer adapters and one installable tool instead of a pile of one-off bridges
+- lower token overhead because MCP discovery and inspection can stay narrow and on demand
+- easier reuse of the same workflows across local agents, hosted MCP clients, and terminal automation
 
 ```
 Skills  -->  MCP Server     (serve skills to any MCP client)
@@ -39,7 +44,6 @@ Any API  -->  CLI           (OpenAPI & GraphQL auto-detection)
 - [Client Compatibility](#client-compatibility)
 - [CLI Reference](#cli-reference)
 - [Development](#development)
-- [Acknowledgements](#acknowledgements)
 - [License](#license)
 
 ## Prerequisites

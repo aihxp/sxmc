@@ -1,10 +1,12 @@
-//! `sxmc` is a native Rust toolkit that bridges AI skills,
-//! [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers,
-//! and APIs into a unified pipeline.
+//! `sxmc` is a native Rust toolkit for turning agent-facing interfaces into
+//! practical tools: skills become MCP servers, MCP servers become terminal
+//! workflows, and APIs become CLIs.
 //!
 //! MCP is an open standard for connecting AI assistants to external tools and
 //! data sources. `sxmc` removes the need to write separate adapters for each
-//! surface by providing one binary that handles all three:
+//! surface by providing one binary that handles all three while reducing
+//! wrapper sprawl, keeping discovery narrower, and making the same capabilities
+//! reusable across agents, shells, and hosted MCP clients:
 //!
 //! - **Skills → MCP server** — serve skill directories as stdio or HTTP MCP endpoints
 //! - **MCP server → CLI** — turn any MCP server into command-line tools
