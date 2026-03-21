@@ -77,6 +77,17 @@ product concern. The more important product value is:
 Benchmarks are useful for regression sanity, not as proof of broad client
 compatibility.
 
+The more reliable value signal is workflow compression:
+
+| Task | Without `sxmc` | With `sxmc` | Practical result |
+|---|---|---|---|
+| List API endpoints | `curl` plus parsing glue | `sxmc api <url> --list` | Replace custom parsing with one command. |
+| Call API endpoint | Manual URL, params, and header construction | `sxmc api <url> operation key=value` | Call by operation name instead of reconstructing the request shape. |
+| Inspect MCP server | Custom JSON-RPC script or dedicated client | `sxmc stdio "<cmd>" --list` | Shell-level MCP inspection becomes repeatable. |
+| Invoke MCP tool | Same plus extra call logic | `sxmc stdio "<cmd>" tool key=value` | One-shot MCP tool access from the terminal. |
+| Scan skills | Grep and manual review | `sxmc scan` | Structured, severity-ranked findings with deeper checks. |
+| `CLI -> AI` startup setup | Manual doc/config work per host | `sxmc inspect cli ...` + `sxmc init ai ...` | Host-aware startup artifacts generated instead of handwritten. |
+
 ## Startup Sanity
 
 Quick startup checks:

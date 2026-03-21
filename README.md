@@ -21,6 +21,17 @@ Why that matters:
 - easier reuse of the same workflows across local agents, hosted MCP clients, and terminal automation
 - startup discoverability without unsafe overwrites because generated docs are preview-first and managed-block based
 
+## Practical Wins
+
+| Task | Without `sxmc` | With `sxmc` | Improvement |
+|---|---|---|---|
+| List API endpoints | `curl` plus custom parsing, and you need to know the response shape | `sxmc api <url> --list` | One command instead of a custom script, with sorted output and operation count included. |
+| Call API endpoint | Must know base URL, path, query params, and headers up front | `sxmc api <url> findPetsByStatus status=available` | Big usability win: use the operation name plus `key=value` without reading the whole spec first. |
+| Inspect MCP server | Usually requires custom JSON-RPC scripting or a purpose-built MCP client | `sxmc stdio "<cmd>" --list` | `sxmc` makes ad hoc MCP inspection shell-friendly, which fills a real tooling gap. |
+| Invoke MCP tool | Same custom scripting problem, plus argument handling | `sxmc stdio "<cmd>" tool_name key=value` | Direct MCP tool access from the terminal without writing a throwaway client. |
+| Security scan skills | Ad hoc `grep` misses hidden Unicode, wildcard permissions, and structured severity | `sxmc scan` | Higher-signal results with rule codes, severity, and checks that plain text search misses. |
+| `CLI -> AI` scaffold | Manual per-host setup and docs generation | `sxmc inspect cli gh` -> `sxmc init ai --from-cli gh` | Turns repetitive startup-doc and config work into generated artifacts for many AI hosts in seconds. |
+
 ```
 Skills  -->  MCP Server     (serve skills to any MCP client)
 MCP Server  -->  CLI        (list MCP surfaces, invoke MCP tools)
