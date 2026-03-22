@@ -143,6 +143,7 @@ The current validation docs capture the real-world comparison set, token/turn es
 - atomic bake persistence
 - bake create/update now validate sources by default, with `--skip-validate` when you intentionally want to persist a broken or offline target
 - bake validation errors now include source-type-specific guidance for stdio, HTTP MCP, OpenAPI, and GraphQL targets
+- invalid `--from-profile` / `inspect profile` inputs now explain that `sxmc` expected a real CLI surface profile from `sxmc inspect cli ...`
 - baked stdio configs can pin a base directory for portable relative paths
 - configurable timeouts for networked commands
 - HTTP MCP guardrails for max concurrency and request body size

@@ -224,6 +224,7 @@ Safety rules:
 - `sxmc init ai --remove` removes previously applied managed blocks and generated config entries for the selected hosts
 - `sxmc bake create` and `sxmc bake update` validate sources by default; use `--skip-validate` when you intentionally want to persist an offline or placeholder target
 - bake validation errors now include source-type-specific hints for stdio, HTTP MCP, OpenAPI, and GraphQL targets so you can tell whether the problem is install, auth, endpoint shape, or just an intentionally offline target
+- `inspect profile` and every `--from-profile` scaffold now fail with a profile-specific error if the input is empty, not valid JSON, or not an `sxmc` CLI surface profile
 
 Deeper inspection:
 

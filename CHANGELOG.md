@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-03-22
+
+### Changed
+
+- invalid profile-file inputs for `inspect profile` and every `--from-profile` scaffold now explain that `sxmc` expected a real CLI surface profile from `sxmc inspect cli ...`
+
 ## [0.2.10] - 2026-03-22
 
 ### Changed

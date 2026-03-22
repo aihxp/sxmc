@@ -126,8 +126,48 @@ pub fn inspect_cli_with_depth(
 }
 
 pub fn load_profile(path: &Path) -> Result<CliSurfaceProfile> {
-    let raw = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&raw)?)
+    let raw = fs::read_to_string(path).map_err(|error| {
+        SxmcError::Other(format!(
+            "Failed to read CLI profile '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+
+    if raw.trim().is_empty() {
+        return Err(SxmcError::Other(format!(
+            "Profile file '{}' is empty. Expected a JSON CLI surface profile from `sxmc inspect cli <tool> --format json-pretty`.",
+            path.display()
+        )));
+    }
+
+    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+        SxmcError::Other(format!(
+            "Profile file '{}' is not valid JSON: {}. Expected a CLI surface profile from `sxmc inspect cli <tool> --format json-pretty`.",
+            path.display(),
+            error
+        ))
+    })?;
+
+    let schema = value
+        .get("profile_schema")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if schema != PROFILE_SCHEMA {
+        return Err(SxmcError::Other(format!(
+            "Profile file '{}' is not a valid sxmc CLI surface profile. Expected `profile_schema: {}` from `sxmc inspect cli <tool> --format json-pretty`.",
+            path.display(),
+            PROFILE_SCHEMA
+        )));
+    }
+
+    serde_json::from_value(value).map_err(|error| {
+        SxmcError::Other(format!(
+            "Profile file '{}' could not be decoded as an sxmc CLI surface profile: {}",
+            path.display(),
+            error
+        ))
+    })
 }
 
 pub fn profile_value(profile: &CliSurfaceProfile) -> Value {

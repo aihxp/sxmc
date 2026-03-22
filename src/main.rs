@@ -2077,8 +2077,7 @@ async fn main() -> anyhow::Result<()> {
                 pretty,
                 format,
             } => {
-                let raw = std::fs::read_to_string(&input)?;
-                let profile: cli_surfaces::CliSurfaceProfile = serde_json::from_str(&raw)?;
+                let profile = cli_surfaces::load_profile(&input)?;
                 let value = if compact {
                     cli_surfaces::compact_profile_value(&profile)
                 } else {

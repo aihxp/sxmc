@@ -1157,6 +1157,53 @@ fn test_scaffold_client_config_for_github_copilot_is_rejected() {
 }
 
 #[test]
+fn test_scaffold_agent_doc_invalid_profile_has_friendly_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let bad_profile = temp.path().join("bad-profile.json");
+    fs::write(&bad_profile, "{not-json").unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "agent-doc",
+            "--from-profile",
+            bad_profile.to_str().unwrap(),
+            "--client",
+            "claude-code",
+            "--mode",
+            "preview",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is not valid JSON"))
+        .stderr(predicate::str::contains(
+            "sxmc inspect cli <tool> --format json-pretty",
+        ));
+}
+
+#[test]
+fn test_inspect_profile_invalid_schema_has_friendly_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let bad_profile = temp.path().join("not-a-cli-profile.json");
+    fs::write(&bad_profile, r#"{"hello":"world"}"#).unwrap();
+
+    sxmc()
+        .args([
+            "inspect",
+            "profile",
+            bad_profile.to_str().unwrap(),
+            "--format",
+            "json-pretty",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "is not a valid sxmc CLI surface profile",
+        ))
+        .stderr(predicate::str::contains("profile_schema"));
+}
+
+#[test]
 fn test_scaffold_client_config_apply_merges_opencode_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("opencode.json");
