@@ -12,6 +12,8 @@ pub struct BakeConfig {
     pub name: String,
     pub source_type: SourceType,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_dir: Option<PathBuf>,
     pub auth_headers: Vec<String>,
     pub env_vars: Vec<String>,
     #[serde(default)]
@@ -134,6 +136,9 @@ impl std::fmt::Display for BakeConfig {
         if let Some(timeout) = self.timeout_seconds {
             write!(f, " [timeout={}s]", timeout)?;
         }
+        if let Some(ref base_dir) = self.base_dir {
+            write!(f, " [base-dir={}]", base_dir.display())?;
+        }
         if let Some(ref desc) = self.description {
             write!(f, " — {}", desc)?;
         }
@@ -156,6 +161,7 @@ mod tests {
                 name: "demo".into(),
                 source_type: SourceType::Stdio,
                 source: "sxmc serve".into(),
+                base_dir: Some(PathBuf::from("/tmp/demo")),
                 auth_headers: Vec::new(),
                 env_vars: Vec::new(),
                 timeout_seconds: Some(15),
@@ -170,5 +176,6 @@ mod tests {
         let parsed: HashMap<String, BakeConfig> = serde_json::from_str(&written).unwrap();
         assert!(parsed.contains_key("demo"));
         assert_eq!(parsed["demo"].timeout_seconds, Some(15));
+        assert_eq!(parsed["demo"].base_dir, Some(PathBuf::from("/tmp/demo")));
     }
 }

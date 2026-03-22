@@ -385,6 +385,8 @@ pub enum BakeAction {
         env_vars: Vec<String>,
         #[arg(long = "timeout-seconds", value_name = "SECONDS")]
         timeout_seconds: Option<u64>,
+        #[arg(long)]
+        base_dir: Option<PathBuf>,
     },
     List,
     Show {
@@ -404,6 +406,8 @@ pub enum BakeAction {
         env_vars: Vec<String>,
         #[arg(long = "timeout-seconds", value_name = "SECONDS")]
         timeout_seconds: Option<u64>,
+        #[arg(long)]
+        base_dir: Option<PathBuf>,
     },
     Remove {
         name: String,
@@ -414,6 +418,8 @@ pub enum BakeAction {
 pub enum InspectAction {
     Cli {
         command: String,
+        #[arg(long, default_value_t = 0)]
+        depth: usize,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]
@@ -435,6 +441,8 @@ pub enum InitAction {
     Ai {
         #[arg(long = "from-cli")]
         from_cli: String,
+        #[arg(long, default_value_t = 0)]
+        depth: usize,
         #[arg(long, value_enum, default_value = "single")]
         coverage: AiCoverage,
         #[arg(long, value_enum)]
@@ -447,6 +455,10 @@ pub enum InitAction {
         root: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,
+        #[arg(long)]
+        remove: bool,
+        #[arg(long)]
+        allow_low_confidence: bool,
         #[arg(long)]
         allow_self: bool,
     },
@@ -477,6 +489,8 @@ pub enum ScaffoldAction {
         root: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,
+        #[arg(long)]
+        allow_low_confidence: bool,
     },
     ClientConfig {
         #[arg(long = "from-profile")]

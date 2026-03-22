@@ -16,6 +16,8 @@ pub struct CliSurfaceProfile {
     pub source: ProfileSource,
     #[serde(default)]
     pub subcommands: Vec<ProfileSubcommand>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subcommand_profiles: Vec<CliSurfaceProfile>,
     #[serde(default)]
     pub options: Vec<ProfileOption>,
     #[serde(default)]
@@ -109,6 +111,51 @@ pub struct Workflow {
 pub struct ConfidenceNote {
     pub level: ConfidenceLevel,
     pub summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProfileQualityReport {
+    pub ready_for_agent_docs: bool,
+    pub reasons: Vec<String>,
+}
+
+impl CliSurfaceProfile {
+    pub fn quality_report(&self) -> ProfileQualityReport {
+        let mut reasons = Vec::new();
+        let generic_summary = self.summary.trim()
+            == format!("{} command-line interface", self.command)
+            || self.summary.trim().eq_ignore_ascii_case(&self.command)
+            || self.summary.trim().len() < 24;
+        if generic_summary {
+            reasons.push(
+                "Summary stayed generic, so generated startup docs may be less useful than a hand-written snippet."
+                    .into(),
+            );
+        }
+        if self.examples.is_empty() {
+            reasons.push(
+                "No usage examples were detected, so generated guidance may not show the best first command."
+                    .into(),
+            );
+        }
+        if self.subcommands.is_empty() && self.options.len() < 2 {
+            reasons.push(
+                "The inspected CLI surface is sparse; sxmc could not confidently extract subcommands or enough options."
+                    .into(),
+            );
+        }
+
+        let rich_surface = !self.examples.is_empty()
+            || !self.subcommand_profiles.is_empty()
+            || self.subcommands.len() >= 3
+            || self.options.len() >= 5;
+
+        ProfileQualityReport {
+            ready_for_agent_docs: rich_surface
+                && !(generic_summary && self.subcommands.is_empty() && self.options.len() < 3),
+            reasons,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

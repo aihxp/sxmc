@@ -70,8 +70,10 @@ Turn a CLI into startup-facing AI artifacts:
 
 ```bash
 sxmc inspect cli gh --format toon
+sxmc inspect cli cargo --depth 1 --format json-pretty
 sxmc init ai --from-cli gh --coverage full --mode preview
 sxmc init ai --from-cli gh --coverage full --host claude-code,cursor,github-copilot --mode apply
+sxmc init ai --from-cli gh --coverage full --host claude-code --mode apply --remove
 ```
 
 Generate shell completions:
@@ -105,8 +107,12 @@ The current validation docs capture the real-world comparison set, token/turn es
 ## Safety and Reliability
 
 - preview-first AI artifact generation
+- low-confidence CLI profiles are blocked from startup-doc generation unless explicitly overridden
 - managed markdown/TOML blocks instead of wholesale overwrites
+- recursive CLI inspection with `sxmc inspect cli --depth 1`
+- cleanup support with `sxmc init ai --remove`
 - atomic bake persistence
+- baked stdio configs can pin a base directory for portable relative paths
 - configurable timeouts for networked commands
 - HTTP MCP guardrails for max concurrency and request body size
 - stateful MCP workflows supported through `sxmc mcp session`

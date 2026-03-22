@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-03-22
+
+### Added
+
+- `sxmc inspect cli --depth 1` for recursive top-level CLI inspection with nested `subcommand_profiles`
+- `sxmc init ai --remove` to clean up previously applied CLI-to-AI startup artifacts
+- `bake create/update --base-dir` so stdio bakes can preserve a working directory for relative sources
+- integration coverage for recursive inspection, low-confidence gating, CLI-to-AI removal, base-dir bakes, and missing-command install hints
+
+### Changed
+
+- CLI inspection now falls back to `man` pages on Unix-like systems when `--help` is sparse or unsupported, which improves BSD/macOS tools like `ls`
+- startup-doc generation now blocks low-confidence CLI profiles by default and requires `--allow-low-confidence` to force low-signal outputs
+- `inspect`, `api --list`, and `mcp servers` now default to structured JSON when stdout is non-interactive, which makes them easier to pipe into agents and scripts
+- stdio MCP spawn failures now include install-oriented hints instead of only low-level OS errors
+- baked stdio MCP connections now honor their stored base directory when reconnecting
+
 ## [0.2.3] - 2026-03-21
 
 ### Changed

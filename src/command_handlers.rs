@@ -129,8 +129,7 @@ pub async fn cmd_api(
     format: Option<output::StructuredOutputFormat>,
 ) -> AnyhowResult<()> {
     if list || search.is_some() {
-        if format.is_some() || pretty {
-            let format = output::resolve_structured_format(format, pretty);
+        if let Some(format) = output::prefer_structured_output(format, pretty) {
             println!(
                 "{}",
                 output::format_structured_value(&client.list_value(search), format)

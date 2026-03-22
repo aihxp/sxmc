@@ -86,7 +86,12 @@ impl ConnectedMcpClient {
             SourceType::Stdio => {
                 let env = parse_env_vars(&config.env_vars);
                 Ok(Self::Stdio(
-                    mcp_stdio::StdioClient::connect(&config.source, &env, None).await?,
+                    mcp_stdio::StdioClient::connect(
+                        &config.source,
+                        &env,
+                        config.base_dir.as_deref(),
+                    )
+                    .await?,
                 ))
             }
             SourceType::Http => {
@@ -984,6 +989,44 @@ fn print_write_outcomes(outcomes: &[cli_surfaces::WriteOutcome]) {
     }
 }
 
+fn print_remove_outcomes(outcomes: &[cli_surfaces::WriteOutcome]) {
+    for outcome in outcomes {
+        match outcome.mode {
+            ArtifactMode::Preview => {}
+            ArtifactMode::WriteSidecar | ArtifactMode::Apply => {
+                println!("Removed {}: {}", outcome.label, outcome.path.display());
+            }
+            ArtifactMode::Patch => {}
+        }
+    }
+}
+
+fn ensure_profile_ready_for_agent_docs(
+    profile: &cli_surfaces::CliSurfaceProfile,
+    allow_low_confidence: bool,
+) -> Result<()> {
+    let report = profile.quality_report();
+    if report.ready_for_agent_docs || allow_low_confidence {
+        return Ok(());
+    }
+
+    let reasons = if report.reasons.is_empty() {
+        "CLI profile confidence is too low for startup-doc generation.".to_string()
+    } else {
+        report
+            .reasons
+            .into_iter()
+            .map(|reason| format!("- {}", reason))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    Err(sxmc::error::SxmcError::Other(format!(
+        "Refusing to generate startup-facing agent docs from a low-confidence CLI profile.\n{}\nUse --allow-low-confidence to force generation or inspect with --depth 1 for a richer profile.",
+        reasons
+    )))
+}
+
 fn require_cli_ai_client(
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
@@ -1307,7 +1350,7 @@ async fn main() -> anyhow::Result<()> {
                 let store = BakeStore::load()?;
                 let servers = baked_mcp_servers(&store);
 
-                if format.is_some() || pretty {
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
                     let value = Value::Array(
                         servers
                             .iter()
@@ -1325,7 +1368,6 @@ async fn main() -> anyhow::Result<()> {
                             })
                             .collect(),
                     );
-                    let format = output::resolve_structured_format(format, pretty);
                     println!("{}", output::format_structured_value(&value, format));
                 } else if servers.is_empty() {
                     println!("No baked MCP servers found.");
@@ -1664,14 +1706,19 @@ async fn main() -> anyhow::Result<()> {
         Commands::Inspect { action } => match action {
             InspectAction::Cli {
                 command,
+                depth,
                 pretty,
                 format,
                 allow_self,
             } => {
-                let profile = cli_surfaces::inspect_cli(&command, allow_self)?;
+                let profile = cli_surfaces::inspect_cli_with_depth(&command, allow_self, depth)?;
                 let value = cli_surfaces::profile_value(&profile);
-                let format = output::resolve_structured_format(format, pretty);
-                println!("{}", output::format_structured_value(&value, format));
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    let format = output::resolve_structured_format(format, pretty);
+                    println!("{}", output::format_structured_value(&value, format));
+                }
             }
             InspectAction::Profile {
                 input,
@@ -1680,24 +1727,34 @@ async fn main() -> anyhow::Result<()> {
             } => {
                 let raw = std::fs::read_to_string(&input)?;
                 let value: Value = serde_json::from_str(&raw)?;
-                let format = output::resolve_structured_format(format, pretty);
-                println!("{}", output::format_structured_value(&value, format));
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    let format = output::resolve_structured_format(format, pretty);
+                    println!("{}", output::format_structured_value(&value, format));
+                }
             }
         },
 
         Commands::Init { action } => match action {
             InitAction::Ai {
                 from_cli,
+                depth,
                 coverage,
                 client,
                 hosts,
                 skills_path,
                 root,
                 mode,
+                remove,
+                allow_low_confidence,
                 allow_self,
             } => {
                 let root = resolve_generation_root(root)?;
-                let profile = cli_surfaces::inspect_cli(&from_cli, allow_self)?;
+                let profile = cli_surfaces::inspect_cli_with_depth(&from_cli, allow_self, depth)?;
+                if !remove {
+                    ensure_profile_ready_for_agent_docs(&profile, allow_low_confidence)?;
+                }
                 let (artifacts, selected_hosts) = resolve_cli_ai_init_artifacts(
                     &profile,
                     coverage,
@@ -1707,13 +1764,23 @@ async fn main() -> anyhow::Result<()> {
                     &skills_path,
                     mode,
                 )?;
-                let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
-                    &artifacts,
-                    mode,
-                    &root,
-                    &selected_hosts,
-                )?;
-                print_write_outcomes(&outcomes);
+                if remove {
+                    let outcomes = cli_surfaces::remove_artifacts_with_apply_selection(
+                        &artifacts,
+                        mode,
+                        &root,
+                        &selected_hosts,
+                    )?;
+                    print_remove_outcomes(&outcomes);
+                } else {
+                    let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
+                        &artifacts,
+                        mode,
+                        &root,
+                        &selected_hosts,
+                    )?;
+                    print_write_outcomes(&outcomes);
+                }
             }
         },
 
@@ -1738,9 +1805,11 @@ async fn main() -> anyhow::Result<()> {
                 hosts,
                 root,
                 mode,
+                allow_low_confidence,
             } => {
                 let root = resolve_generation_root(root)?;
                 let profile = cli_surfaces::load_profile(&from_profile)?;
+                ensure_profile_ready_for_agent_docs(&profile, allow_low_confidence)?;
                 let (artifacts, selected_hosts) = resolve_cli_ai_agent_doc_artifacts(
                     &profile, coverage, client, &hosts, &root, mode,
                 )?;
@@ -1815,6 +1884,7 @@ async fn main() -> anyhow::Result<()> {
                 auth_headers,
                 env_vars,
                 timeout_seconds,
+                base_dir,
             } => {
                 let st = parse_source_type(&source_type);
                 let mut store = BakeStore::load()?;
@@ -1822,6 +1892,7 @@ async fn main() -> anyhow::Result<()> {
                     name: name.clone(),
                     source_type: st,
                     source,
+                    base_dir: base_dir.or_else(|| std::env::current_dir().ok()),
                     auth_headers,
                     env_vars,
                     timeout_seconds,
@@ -1846,6 +1917,9 @@ async fn main() -> anyhow::Result<()> {
                     println!("Name: {}", config.name);
                     println!("Type: {:?}", config.source_type);
                     println!("Source: {}", config.source);
+                    if let Some(ref base_dir) = config.base_dir {
+                        println!("Base dir: {}", base_dir.display());
+                    }
                     if let Some(ref desc) = config.description {
                         println!("Description: {}", desc);
                     }
@@ -1871,6 +1945,7 @@ async fn main() -> anyhow::Result<()> {
                 auth_headers,
                 env_vars,
                 timeout_seconds,
+                base_dir,
             } => {
                 let mut store = BakeStore::load()?;
                 let existing = match store.show(&name) {
@@ -1880,6 +1955,7 @@ async fn main() -> anyhow::Result<()> {
                         std::process::exit(1);
                     }
                 };
+                let source_changed = source_type.is_some() || source.is_some();
 
                 let updated = BakeConfig {
                     name: name.clone(),
@@ -1888,6 +1964,15 @@ async fn main() -> anyhow::Result<()> {
                         .map(parse_source_type)
                         .unwrap_or(existing.source_type),
                     source: source.unwrap_or(existing.source),
+                    base_dir: base_dir
+                        .or_else(|| {
+                            if source_changed {
+                                std::env::current_dir().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .or(existing.base_dir),
                     auth_headers: if auth_headers.is_empty() {
                         existing.auth_headers
                     } else {

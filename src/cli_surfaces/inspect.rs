@@ -71,6 +71,14 @@ fn parse_windows_command_spec(command: &str) -> Option<Vec<String>> {
 }
 
 pub fn inspect_cli(command_spec: &str, allow_self: bool) -> Result<CliSurfaceProfile> {
+    inspect_cli_with_depth(command_spec, allow_self, 0)
+}
+
+pub fn inspect_cli_with_depth(
+    command_spec: &str,
+    allow_self: bool,
+    depth: usize,
+) -> Result<CliSurfaceProfile> {
     let parts = parse_command_spec(command_spec)?;
     if parts.is_empty() {
         return Err(SxmcError::Other("Empty command spec".into()));
@@ -89,8 +97,7 @@ pub fn inspect_cli(command_spec: &str, allow_self: bool) -> Result<CliSurfacePro
         ));
     }
 
-    let help_text = read_help_text(&parts, &command_name)?;
-    Ok(parse_help_text(&command_name, executable, &help_text))
+    inspect_parts(&parts, &command_name, executable, allow_self, depth, 0)
 }
 
 pub fn load_profile(path: &Path) -> Result<CliSurfaceProfile> {
@@ -107,23 +114,105 @@ fn is_self_command(command_name: &str) -> bool {
     lowered == "sxmc" || lowered == "sxmc.exe"
 }
 
-fn read_help_text(parts: &[String], command_name: &str) -> Result<String> {
-    let primary = run_help_variant(parts, &["--help"])?;
-    let mut candidates = vec![primary.clone()];
+fn inspect_parts(
+    parts: &[String],
+    command_name: &str,
+    source_identifier: &str,
+    allow_self: bool,
+    remaining_depth: usize,
+    generation_depth: u32,
+) -> Result<CliSurfaceProfile> {
+    let help_text = read_help_text(parts, command_name)?;
+    let mut profile = parse_help_text(command_name, source_identifier, &help_text);
+    profile.provenance.generation_depth = generation_depth;
 
-    let lowered = primary.to_ascii_lowercase();
-    if lowered.contains("--help-all") || lowered.contains("complete help information") {
-        if let Ok(text) = run_help_variant(parts, &["--help-all"]) {
-            if !text.trim().is_empty() {
-                candidates.push(text);
+    if remaining_depth > 0 {
+        let mut subcommand_profiles = Vec::new();
+        for subcommand in profile
+            .subcommands
+            .iter()
+            .filter(|subcommand| subcommand.confidence != ConfidenceLevel::Low)
+        {
+            if subcommand.name == command_name {
+                continue;
+            }
+
+            let mut child_parts = parts.to_vec();
+            child_parts.push(subcommand.name.clone());
+            let child_source = format!("{source_identifier} {}", subcommand.name);
+            let child_name = subcommand.name.clone();
+
+            if let Ok(child_profile) = inspect_parts(
+                &child_parts,
+                &child_name,
+                &child_source,
+                allow_self,
+                remaining_depth.saturating_sub(1),
+                generation_depth + 1,
+            ) {
+                subcommand_profiles.push(child_profile);
+            }
+        }
+
+        if !subcommand_profiles.is_empty() {
+            profile.subcommand_profiles = subcommand_profiles;
+        }
+    }
+
+    if remaining_depth > 0
+        && profile.subcommand_profiles.is_empty()
+        && !profile.subcommands.is_empty()
+    {
+        profile.confidence_notes.push(ConfidenceNote {
+            level: ConfidenceLevel::Low,
+            summary: "Recursive inspection was requested, but nested subcommand help could not be collected for this CLI.".into(),
+        });
+    }
+
+    if looks_generic_summary(&profile.summary, command_name)
+        && looks_like_man_fallback_candidate(&help_text)
+    {
+        profile.confidence_notes.push(ConfidenceNote {
+            level: ConfidenceLevel::Low,
+            summary: "Help output stayed generic even after inspection; review generated startup docs before applying them.".into(),
+        });
+    }
+
+    if !allow_self && is_self_command(command_name) {
+        return Err(SxmcError::Other(
+            "Refusing to inspect sxmc itself without --allow-self".into(),
+        ));
+    }
+
+    Ok(profile)
+}
+
+fn read_help_text(parts: &[String], command_name: &str) -> Result<String> {
+    let mut candidates = Vec::new();
+
+    if let Ok(primary) = run_help_variant(parts, &["--help"]) {
+        let lowered = primary.to_ascii_lowercase();
+        candidates.push(primary.clone());
+
+        if lowered.contains("--help-all") || lowered.contains("complete help information") {
+            if let Ok(text) = run_help_variant(parts, &["--help-all"]) {
+                if !text.trim().is_empty() {
+                    candidates.push(text);
+                }
+            }
+        }
+        if lowered.contains("--help all") || lowered.contains("help all") {
+            if let Ok(text) = run_help_variant(parts, &["--help", "all"]) {
+                if !text.trim().is_empty() {
+                    candidates.push(text);
+                }
             }
         }
     }
-    if lowered.contains("--help all") || lowered.contains("help all") {
-        if let Ok(text) = run_help_variant(parts, &["--help", "all"]) {
-            if !text.trim().is_empty() {
-                candidates.push(text);
-            }
+
+    if let Ok(text) = read_man_page_text(command_name) {
+        if !text.trim().is_empty() {
+            candidates.push(text);
         }
     }
 
@@ -138,6 +227,38 @@ fn read_help_text(parts: &[String], command_name: &str) -> Result<String> {
         })
 }
 
+#[cfg(not(windows))]
+fn read_man_page_text(command_name: &str) -> Result<String> {
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg("MANPAGER=cat man \"$SXMC_MAN_TARGET\" 2>/dev/null | col -b")
+        .env("SXMC_MAN_TARGET", command_name)
+        .output()
+        .map_err(|e| {
+            SxmcError::Other(format!(
+                "Failed to query man page for '{}': {}",
+                command_name, e
+            ))
+        })?;
+
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if text.trim().is_empty() {
+        return Err(SxmcError::Other(format!(
+            "No readable man page output for '{}'",
+            command_name
+        )));
+    }
+
+    Ok(text)
+}
+
+#[cfg(windows)]
+fn read_man_page_text(_command_name: &str) -> Result<String> {
+    Err(SxmcError::Other(
+        "man-page fallback is not available on Windows".into(),
+    ))
+}
+
 fn run_help_variant(parts: &[String], extra_args: &[&str]) -> Result<String> {
     let mut command = Command::new(&parts[0]);
     if parts.len() > 1 {
@@ -145,12 +266,19 @@ fn run_help_variant(parts: &[String], extra_args: &[&str]) -> Result<String> {
     }
     command.args(extra_args);
     let output = command.output().map_err(|e| {
-        SxmcError::Other(format!(
-            "Failed to run '{} {}': {}",
-            parts[0],
-            extra_args.join(" "),
-            e
-        ))
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SxmcError::Other(format!(
+                "Could not find command '{}' on PATH while probing help. Install it first or pass a full executable path.",
+                parts[0]
+            ))
+        } else {
+            SxmcError::Other(format!(
+                "Failed to run '{} {}': {}",
+                parts[0],
+                extra_args.join(" "),
+                e
+            ))
+        }
     })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -223,6 +351,7 @@ fn parse_help_text(command_name: &str, source_identifier: &str, help: &str) -> C
             identifier: source_identifier.into(),
         },
         subcommands,
+        subcommand_profiles: Vec::new(),
         options,
         positionals,
         examples,
@@ -244,6 +373,10 @@ fn parse_help_text(command_name: &str, source_identifier: &str, help: &str) -> C
 }
 
 fn select_summary(lines: &[&str], command_name: &str) -> String {
+    if let Some(summary) = parse_man_name_summary(lines, command_name) {
+        return summary;
+    }
+
     let first_non_empty = lines
         .iter()
         .map(|line| line.trim())
@@ -283,6 +416,10 @@ fn select_summary(lines: &[&str], command_name: &str) -> String {
 }
 
 fn parse_description(lines: &[&str], command_name: &str, summary: &str) -> Option<String> {
+    if let Some(description) = parse_man_description(lines, command_name) {
+        return Some(description);
+    }
+
     let mut description = Vec::new();
     let mut started = false;
     let mut skipped_summary = false;
@@ -408,6 +545,10 @@ fn parse_options(lines: &[&str]) -> Vec<ProfileOption> {
             }
         }
     }
+    if options.is_empty() && looks_like_man_page(lines) {
+        return parse_man_options(lines);
+    }
+
     options
 }
 
@@ -596,6 +737,16 @@ fn is_major_section_heading(line: &str) -> bool {
     is_upperish
 }
 
+fn looks_like_man_page(lines: &[&str]) -> bool {
+    lines.iter().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "NAME"
+            || trimmed == "SYNOPSIS"
+            || trimmed == "DESCRIPTION"
+            || trimmed == "OPTIONS"
+    })
+}
+
 fn is_command_section_heading(line: &str) -> bool {
     let trimmed = line.trim();
     let lowered = trimmed.trim_end_matches(':').to_ascii_lowercase();
@@ -616,6 +767,11 @@ fn looks_like_usage_line(line: &str, command_name: &str) -> bool {
     lowered.starts_with("usage:")
         || lowered == "usage"
         || lowered.starts_with(&format!("{command_name} "))
+}
+
+fn looks_like_man_fallback_candidate(help: &str) -> bool {
+    help.lines()
+        .any(|line| matches!(line.trim(), "NAME" | "SYNOPSIS" | "DESCRIPTION"))
 }
 
 fn is_unhelpful_summary_line(line: &str, command_name: &str) -> bool {
@@ -640,6 +796,13 @@ fn is_unhelpful_summary_line(line: &str, command_name: &str) -> bool {
         || trimmed == command_name
         || trimmed == format!("{command_name} <command>")
         || is_version_banner(trimmed)
+}
+
+fn looks_generic_summary(summary: &str, command_name: &str) -> bool {
+    let trimmed = summary.trim();
+    trimmed.eq_ignore_ascii_case(&format!("{command_name} command-line interface"))
+        || trimmed.eq_ignore_ascii_case(command_name)
+        || trimmed.starts_with("usage:")
 }
 
 fn is_version_banner(line: &str) -> bool {
@@ -689,6 +852,102 @@ fn sanitize_for_profile(text: &str, command_name: &str) -> String {
         .into_owned();
 
     sanitized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn parse_man_name_summary(lines: &[&str], command_name: &str) -> Option<String> {
+    let mut in_name = false;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "NAME" {
+            in_name = true;
+            continue;
+        }
+        if !in_name {
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if is_major_section_heading(trimmed) {
+            break;
+        }
+
+        let summary = trimmed
+            .split_once(" - ")
+            .or_else(|| trimmed.split_once(" – "))
+            .map(|(_, summary)| summary.trim())
+            .unwrap_or(trimmed);
+        let sanitized = sanitize_for_profile(summary, command_name);
+        if !sanitized.is_empty() {
+            return Some(sanitized);
+        }
+    }
+    None
+}
+
+fn parse_man_description(lines: &[&str], command_name: &str) -> Option<String> {
+    let mut in_description = false;
+    let mut collected = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "DESCRIPTION" {
+            in_description = true;
+            continue;
+        }
+        if !in_description {
+            continue;
+        }
+        if trimmed.is_empty() {
+            if !collected.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if is_major_section_heading(trimmed) {
+            break;
+        }
+        if trimmed.starts_with('-') {
+            break;
+        }
+        collected.push(sanitize_for_profile(trimmed, command_name));
+    }
+
+    (!collected.is_empty()).then(|| collected.join(" "))
+}
+
+fn parse_man_options(lines: &[&str]) -> Vec<ProfileOption> {
+    let mut options = Vec::new();
+    let mut in_description = false;
+    for line in lines {
+        let trimmed = line.trim_end();
+        let stripped = trimmed.trim();
+        if stripped == "DESCRIPTION" || stripped == "OPTIONS" {
+            in_description = true;
+            continue;
+        }
+        if !in_description {
+            continue;
+        }
+        if stripped.is_empty() {
+            continue;
+        }
+        if is_major_section_heading(stripped) && stripped != "DESCRIPTION" && stripped != "OPTIONS"
+        {
+            break;
+        }
+        if let Some(option) = parse_option_entry(stripped) {
+            options.push(option);
+        } else if let Some(last) = options.last_mut() {
+            if !stripped.starts_with('-') {
+                let merged = match &last.summary {
+                    Some(existing) => format!("{existing} {stripped}"),
+                    None => stripped.to_string(),
+                };
+                last.summary = Some(merged);
+            }
+        }
+    }
+    options
 }
 
 fn parse_subcommand_row(

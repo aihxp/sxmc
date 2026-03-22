@@ -123,6 +123,18 @@ fn command_json(args: &[&str]) -> Value {
     serde_json::from_str(&command_stdout(args)).unwrap()
 }
 
+#[cfg(not(windows))]
+fn write_fake_cli(dir: &Path, help_text: &str) -> std::path::PathBuf {
+    let script = dir.join("fake-cli");
+    let body = format!("#!/bin/sh\ncat <<'EOF'\n{help_text}\nEOF\n");
+    fs::write(&script, body).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
 #[test]
 fn test_version() {
     sxmc()
@@ -160,6 +172,73 @@ fn test_completions_bash() {
         .assert()
         .success()
         .stdout(predicate::str::contains("_sxmc"));
+}
+
+#[test]
+fn test_inspect_cli_depth_one_collects_nested_profiles() {
+    let output = sxmc()
+        .args(["inspect", "cli", "cargo", "--depth", "1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let nested = value["subcommand_profiles"].as_array().unwrap();
+    assert!(!nested.is_empty());
+    assert!(nested.iter().any(|profile| profile["command"] == "build"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inspect_cli_uses_man_page_fallback_for_bsd_tools() {
+    let output = sxmc().args(["inspect", "cli", "ls"]).output().unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_ne!(value["summary"], "ls command-line interface");
+    assert!(
+        value["options"]
+            .as_array()
+            .map(|options| !options.is_empty())
+            .unwrap_or(false),
+        "expected man-page fallback to recover options for ls"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_init_ai_blocks_low_confidence_profiles_without_override() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_cli(temp.path(), "usage: fake-cli [options]");
+
+    sxmc()
+        .args([
+            "init",
+            "ai",
+            "--from-cli",
+            fake.to_str().unwrap(),
+            "--client",
+            "claude-code",
+            "--mode",
+            "preview",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("low-confidence CLI profile"));
+
+    sxmc()
+        .args([
+            "init",
+            "ai",
+            "--from-cli",
+            fake.to_str().unwrap(),
+            "--client",
+            "claude-code",
+            "--mode",
+            "preview",
+            "--allow-low-confidence",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sxmc CLI Surface"));
 }
 
 #[test]
@@ -213,6 +292,54 @@ fn test_bake_timeout_round_trip() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Timeout: 9s"));
+}
+
+#[test]
+fn test_bake_stdio_base_dir_round_trip_and_relative_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let skills_dir = temp.path().join("skills");
+    fs::create_dir_all(skills_dir.join("mini")).unwrap();
+    fs::write(
+        skills_dir.join("mini").join("SKILL.md"),
+        r#"---
+name: mini
+description: "Mini skill"
+---
+
+Hello
+"#,
+    )
+    .unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "relative-stdio",
+            "--type",
+            "stdio",
+            "--source",
+            r#"["sxmc","serve","--paths","."]"#,
+            "--base-dir",
+            skills_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args(["bake", "show", "relative-stdio"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Base dir:"))
+        .stdout(predicate::str::contains(
+            skills_dir.to_string_lossy().as_ref(),
+        ));
+
+    sxmc_with_config_home(temp.path())
+        .args(["mcp", "prompts", "relative-stdio", "--limit", "5"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mini"));
 }
 
 #[test]
@@ -875,6 +1002,59 @@ fn test_scaffold_llms_txt_apply_writes_export() {
 }
 
 #[test]
+fn test_init_ai_remove_cleans_up_applied_files() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc()
+        .args([
+            "init",
+            "ai",
+            "--from-cli",
+            "cargo",
+            "--client",
+            "claude-code",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+            "--depth",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let claude_path = temp.path().join("CLAUDE.md");
+    assert!(claude_path.exists());
+
+    sxmc()
+        .args([
+            "init",
+            "ai",
+            "--from-cli",
+            "cargo",
+            "--client",
+            "claude-code",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+            "--depth",
+            "1",
+            "--remove",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        !claude_path.exists()
+            || !fs::read_to_string(&claude_path)
+                .unwrap()
+                .contains("sxmc CLI Surface"),
+        "expected CLI->AI remove to clean up the managed CLAUDE.md block"
+    );
+}
+
+#[test]
 fn test_scan_clean_skills() {
     sxmc()
         .args([
@@ -1059,9 +1239,17 @@ fn test_mcp_servers_and_tools_via_bake() {
     sxmc_with_config_home(temp.path())
         .args(["mcp", "servers"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("fixture-mcp-tools [stdio]"))
-        .stdout(predicate::str::contains("Fixture MCP server"));
+        .success();
+
+    let output = sxmc_with_config_home(temp.path())
+        .args(["mcp", "servers"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value[0]["name"], bake_name);
+    assert_eq!(value[0]["transport"], "stdio");
+    assert_eq!(value[0]["description"], "Fixture MCP server");
 
     sxmc_with_config_home(temp.path())
         .args(["mcp", "tools", bake_name, "--limit", "2"])
@@ -1102,6 +1290,16 @@ fn test_mcp_grep_via_bake() {
         .stdout(predicate::str::contains("Matches for 'skill'"))
         .stdout(predicate::str::contains("fixture-mcp/get_available_skills"))
         .stdout(predicate::str::contains("fixture-mcp/get_skill_details"));
+}
+
+#[test]
+fn test_stdio_missing_command_has_install_hint() {
+    sxmc()
+        .args(["stdio", "definitely-not-a-real-command-xyz", "--list"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("command not found on PATH"))
+        .stderr(predicate::str::contains("npx"));
 }
 
 #[test]

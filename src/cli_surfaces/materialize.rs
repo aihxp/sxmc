@@ -317,6 +317,95 @@ pub fn materialize_artifacts_with_apply_selection(
     Ok(outcomes)
 }
 
+pub fn remove_artifacts(
+    artifacts: &[GeneratedArtifact],
+    mode: ArtifactMode,
+    root: &Path,
+) -> Result<Vec<WriteOutcome>> {
+    let mut outcomes = Vec::new();
+    for artifact in artifacts {
+        match mode {
+            ArtifactMode::Preview => {
+                println!(
+                    "Would remove {}: {}",
+                    artifact.label,
+                    artifact.target_path.display()
+                );
+                outcomes.push(WriteOutcome {
+                    label: artifact.label.clone(),
+                    path: artifact.target_path.clone(),
+                    mode,
+                });
+            }
+            ArtifactMode::WriteSidecar => {
+                let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+                remove_path_if_exists(&path)?;
+                outcomes.push(WriteOutcome {
+                    label: artifact.label.clone(),
+                    path,
+                    mode,
+                });
+            }
+            ArtifactMode::Patch => {
+                println!("{}", render_remove_patch_preview(artifact, root)?);
+                outcomes.push(WriteOutcome {
+                    label: artifact.label.clone(),
+                    path: artifact.target_path.clone(),
+                    mode,
+                });
+            }
+            ArtifactMode::Apply => {
+                let path = remove_artifact(artifact, root)?;
+                outcomes.push(WriteOutcome {
+                    label: artifact.label.clone(),
+                    path,
+                    mode,
+                });
+            }
+        }
+    }
+    Ok(outcomes)
+}
+
+pub fn remove_artifacts_with_apply_selection(
+    artifacts: &[GeneratedArtifact],
+    mode: ArtifactMode,
+    root: &Path,
+    selected_clients: &[AiClientProfile],
+) -> Result<Vec<WriteOutcome>> {
+    let mut outcomes = Vec::new();
+    for artifact in artifacts {
+        let effective_mode = if mode == ArtifactMode::Apply {
+            match artifact.audience {
+                ArtifactAudience::Shared => ArtifactMode::Apply,
+                ArtifactAudience::Portable => {
+                    if selected_clients.is_empty() {
+                        ArtifactMode::WriteSidecar
+                    } else {
+                        ArtifactMode::Apply
+                    }
+                }
+                ArtifactAudience::Client(client) => {
+                    if selected_clients.contains(&client) {
+                        ArtifactMode::Apply
+                    } else {
+                        ArtifactMode::WriteSidecar
+                    }
+                }
+            }
+        } else {
+            mode
+        };
+
+        outcomes.extend(remove_artifacts(
+            std::slice::from_ref(artifact),
+            effective_mode,
+            root,
+        )?);
+    }
+    Ok(outcomes)
+}
+
 fn sidecar_path(scope: &str, root: &Path, original_target: &Path) -> PathBuf {
     let file_name = original_target
         .file_name()
@@ -336,6 +425,21 @@ fn render_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Result<Str
         String::new()
     };
     let proposed = proposed_applied_content(artifact, root)?;
+    Ok(format!(
+        "--- {}\n+++ {}\n{}\n",
+        artifact.target_path.display(),
+        artifact.target_path.display(),
+        render_patch_body(&existing, &proposed)
+    ))
+}
+
+fn render_remove_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Result<String> {
+    let existing = if artifact.target_path.exists() {
+        fs::read_to_string(&artifact.target_path)?
+    } else {
+        String::new()
+    };
+    let proposed = proposed_removed_content(artifact, root)?;
     Ok(format!(
         "--- {}\n+++ {}\n{}\n",
         artifact.target_path.display(),
@@ -380,6 +484,46 @@ fn proposed_applied_content(artifact: &GeneratedArtifact, _root: &Path) -> Resul
         }
         ApplyStrategy::DirectWrite => Ok(artifact.content.clone()),
         ApplyStrategy::SidecarOnly => Ok(artifact.content.clone()),
+    }
+}
+
+fn proposed_removed_content(artifact: &GeneratedArtifact, root: &Path) -> Result<String> {
+    match artifact.apply_strategy {
+        ApplyStrategy::SidecarOnly => {
+            let _path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            Ok(String::new())
+        }
+        ApplyStrategy::ManagedMarkdownBlock => {
+            let existing = if artifact.target_path.exists() {
+                fs::read_to_string(&artifact.target_path)?
+            } else {
+                String::new()
+            };
+            Ok(remove_managed_block(
+                &existing,
+                markdown_block_markers(artifact),
+            ))
+        }
+        ApplyStrategy::JsonMcpConfig => {
+            let existing = if artifact.target_path.exists() {
+                fs::read_to_string(&artifact.target_path)?
+            } else {
+                String::new()
+            };
+            remove_json_mcp_config(&existing, &artifact.content)
+        }
+        ApplyStrategy::TomlManagedBlock => {
+            let existing = if artifact.target_path.exists() {
+                fs::read_to_string(&artifact.target_path)?
+            } else {
+                String::new()
+            };
+            Ok(remove_managed_block(
+                &existing,
+                toml_block_markers(artifact),
+            ))
+        }
+        ApplyStrategy::DirectWrite => Ok(String::new()),
     }
 }
 
@@ -449,11 +593,68 @@ fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> 
     }
 }
 
+fn remove_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> {
+    match artifact.apply_strategy {
+        ApplyStrategy::SidecarOnly => {
+            let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            remove_path_if_exists(&path)?;
+            Ok(path)
+        }
+        ApplyStrategy::ManagedMarkdownBlock => {
+            if !artifact.target_path.exists() {
+                return Ok(artifact.target_path.clone());
+            }
+            let existing = fs::read_to_string(&artifact.target_path)?;
+            let updated = remove_managed_block(&existing, markdown_block_markers(artifact));
+            write_or_remove_target(&artifact.target_path, &updated)?;
+            Ok(artifact.target_path.clone())
+        }
+        ApplyStrategy::JsonMcpConfig => {
+            if !artifact.target_path.exists() {
+                return Ok(artifact.target_path.clone());
+            }
+            let existing = fs::read_to_string(&artifact.target_path)?;
+            let updated = remove_json_mcp_config(&existing, &artifact.content)?;
+            write_or_remove_target(&artifact.target_path, &updated)?;
+            Ok(artifact.target_path.clone())
+        }
+        ApplyStrategy::TomlManagedBlock => {
+            if !artifact.target_path.exists() {
+                return Ok(artifact.target_path.clone());
+            }
+            let existing = fs::read_to_string(&artifact.target_path)?;
+            let updated = remove_managed_block(&existing, toml_block_markers(artifact));
+            write_or_remove_target(&artifact.target_path, &updated)?;
+            Ok(artifact.target_path.clone())
+        }
+        ApplyStrategy::DirectWrite => {
+            remove_path_if_exists(&artifact.target_path)?;
+            Ok(artifact.target_path.clone())
+        }
+    }
+}
+
 fn write_file(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, content)?;
+    Ok(())
+}
+
+fn write_or_remove_target(path: &Path, content: &str) -> Result<()> {
+    if content.trim().is_empty() {
+        remove_path_if_exists(path)?;
+    } else {
+        write_file(path, content)?;
+    }
+    Ok(())
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
     Ok(())
 }
 
@@ -498,6 +699,26 @@ fn upsert_managed_block(existing: &str, new_content: &str, markers: (String, Str
     updated.push_str("\n\n");
     updated.push_str(&block);
     updated
+}
+
+fn remove_managed_block(existing: &str, markers: (String, String)) -> String {
+    if let (Some(start), Some(end)) = (existing.find(&markers.0), existing.find(&markers.1)) {
+        let before = existing[..start].trim_end_matches('\n');
+        let after = existing[end + markers.1.len()..].trim_start_matches('\n');
+        let mut updated = String::new();
+        if !before.is_empty() {
+            updated.push_str(before);
+        }
+        if !before.is_empty() && !after.is_empty() {
+            updated.push_str("\n\n");
+        }
+        if !after.is_empty() {
+            updated.push_str(after);
+        }
+        return updated;
+    }
+
+    existing.to_string()
 }
 
 fn merge_json_mcp_config(existing: &str, generated: &str) -> Result<String> {
@@ -545,6 +766,52 @@ fn merge_json_mcp_config(existing: &str, generated: &str) -> Result<String> {
     }
 
     serde_json::to_string_pretty(&base).map_err(Into::into)
+}
+
+fn remove_json_mcp_config(existing: &str, generated: &str) -> Result<String> {
+    if existing.trim().is_empty() {
+        return Ok(String::new());
+    }
+
+    let generated_value = serde_json::from_str::<Value>(generated)?;
+    let root_key = if generated_value.get("mcpServers").is_some() {
+        "mcpServers"
+    } else if generated_value.get("mcp").is_some() {
+        "mcp"
+    } else {
+        return Err(SxmcError::Other(
+            "Generated config missing mcpServers or mcp object".into(),
+        ));
+    };
+
+    let mut base = serde_json::from_str::<Value>(existing)?;
+    let generated_servers = generated_value
+        .get(root_key)
+        .and_then(Value::as_object)
+        .ok_or_else(|| SxmcError::Other(format!("Generated config missing {} object", root_key)))?;
+
+    let root_obj = match base.as_object_mut() {
+        Some(root) => root,
+        None => return Ok(existing.to_string()),
+    };
+
+    let Some(servers) = root_obj.get_mut(root_key).and_then(Value::as_object_mut) else {
+        return Ok(existing.to_string());
+    };
+
+    for name in generated_servers.keys() {
+        servers.remove(name);
+    }
+
+    if servers.is_empty() {
+        root_obj.remove(root_key);
+    }
+
+    if root_obj.is_empty() {
+        Ok(String::new())
+    } else {
+        serde_json::to_string_pretty(&base).map_err(Into::into)
+    }
 }
 
 #[cfg(test)]

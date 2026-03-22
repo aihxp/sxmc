@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::path::Path;
 
 use rmcp::model::*;
@@ -38,8 +39,9 @@ impl StdioClient {
             cmd.current_dir(cwd);
         }
 
+        let executable = parts[0].clone();
         let transport = TokioChildProcess::new(cmd)
-            .map_err(|e| SxmcError::McpError(format!("Failed to spawn: {}", e)))?;
+            .map_err(|e| SxmcError::McpError(format_spawn_error(&executable, &e)))?;
 
         let service = ()
             .serve(transport)
@@ -136,6 +138,17 @@ impl StdioClient {
             .map_err(|e| SxmcError::McpError(format!("Failed to close: {}", e)))?;
         Ok(())
     }
+}
+
+fn format_spawn_error(executable: &str, error: &std::io::Error) -> String {
+    if error.kind() == ErrorKind::NotFound {
+        return format!(
+            "Failed to spawn '{}': command not found on PATH. Install it first, or use a launcher such as `npx ...` if it comes from an external package.",
+            executable
+        );
+    }
+
+    format!("Failed to spawn '{}': {}", executable, error)
 }
 
 #[cfg(test)]

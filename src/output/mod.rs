@@ -4,6 +4,7 @@ use rmcp::model::{
     ReadResourceResult, Resource, ResourceContents, ServerInfo, Tool,
 };
 use serde_json::{json, Map, Value};
+use std::io::IsTerminal;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum StructuredOutputFormat {
@@ -21,6 +22,17 @@ pub fn resolve_structured_format(
     } else {
         StructuredOutputFormat::Json
     })
+}
+
+pub fn prefer_structured_output(
+    format: Option<StructuredOutputFormat>,
+    pretty: bool,
+) -> Option<StructuredOutputFormat> {
+    if format.is_some() || pretty || !std::io::stdout().is_terminal() {
+        Some(resolve_structured_format(format, pretty))
+    } else {
+        None
+    }
 }
 
 pub fn format_structured_value(value: &Value, format: StructuredOutputFormat) -> String {

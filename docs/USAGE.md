@@ -139,6 +139,7 @@ Inspect a real CLI:
 ```bash
 sxmc inspect cli gh --format json-pretty
 sxmc inspect cli gh --format toon
+sxmc inspect cli cargo --depth 1 --format json-pretty
 ```
 
 Generate startup-facing artifacts for a host profile:
@@ -148,6 +149,7 @@ sxmc init ai --from-cli gh --client claude-code --mode preview
 sxmc init ai --from-cli gh --client cursor --mode preview
 sxmc init ai --from-cli gh --coverage full --mode preview
 sxmc init ai --from-cli gh --coverage full --host claude-code,cursor --mode apply
+sxmc init ai --from-cli gh --coverage full --host claude-code --mode apply --remove
 ```
 
 Pipeline summary:
@@ -199,9 +201,17 @@ Safety rules:
 - `apply` uses managed `sxmc` blocks for markdown docs
 - JSON MCP configs are merged where the host shape is known
 - `sxmc` refuses to inspect itself unless you pass `--allow-self`
+- `sxmc init ai` blocks low-confidence startup-doc generation unless you pass `--allow-low-confidence`
 - skill and MCP-wrapper scaffolds write new files rather than mutating existing docs
 - `--coverage full` is the best way to generate broad startup coverage without committing to every host at once
 - `--coverage full --mode apply` requires one or more `--host` values and sidecars the non-selected hosts
+- `sxmc init ai --remove` removes previously applied managed blocks and generated config entries for the selected hosts
+
+Deeper inspection:
+
+- `sxmc inspect cli --depth 1` recursively inspects top-level high-confidence subcommands
+- nested subcommand profiles are stored under `subcommand_profiles`
+- macOS and BSD-style tools can fall back to `man` output when `--help` is sparse or unsupported
 
 Current host profiles:
 
