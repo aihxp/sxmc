@@ -162,7 +162,8 @@ fn test_help() {
         .stdout(predicate::str::contains("scaffold"))
         .stdout(predicate::str::contains("scan"))
         .stdout(predicate::str::contains("bake"))
-        .stdout(predicate::str::contains("completions"));
+        .stdout(predicate::str::contains("completions"))
+        .stdout(predicate::str::contains("doctor"));
 }
 
 #[test]
@@ -172,6 +173,30 @@ fn test_completions_bash() {
         .assert()
         .success()
         .stdout(predicate::str::contains("_sxmc"));
+}
+
+#[test]
+fn test_doctor_reports_recommended_first_moves_as_json_off_tty() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("AGENTS.md"), "# Existing\n").unwrap();
+
+    let value = command_json(&["doctor", "--root", temp.path().to_str().unwrap()]);
+    assert_eq!(value["root"], temp.path().to_string_lossy().as_ref());
+    assert_eq!(
+        value["startup_files"]["portable_agent_doc"]["present"],
+        Value::Bool(true)
+    );
+    let moves = value["recommended_first_moves"].as_array().unwrap();
+    assert!(moves.iter().any(|entry| entry["surface"] == "unknown_cli"
+        && entry["command"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("sxmc inspect cli")));
+    assert!(moves.iter().any(|entry| entry["surface"] == "unknown_api"
+        && entry["command"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("sxmc api <url-or-spec> --list")));
 }
 
 #[test]
@@ -563,7 +588,11 @@ fn test_init_ai_preview_for_claude() {
         .success()
         .stdout(predicate::str::contains("Target:"))
         .stdout(predicate::str::contains("CLAUDE.md"))
-        .stdout(predicate::str::contains("sxmc CLI Surface"));
+        .stdout(predicate::str::contains("sxmc CLI Surface"))
+        .stdout(predicate::str::contains(
+            "sxmc inspect cli <tool> --depth 1 --format json-pretty",
+        ))
+        .stdout(predicate::str::contains("sxmc api <url-or-spec> --list"));
 }
 
 #[test]

@@ -366,6 +366,21 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Show startup-discovery status and recommended first sxmc commands
+    Doctor {
+        /// Project root to inspect for startup-facing AI files
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
 }
 
 #[derive(Subcommand)]

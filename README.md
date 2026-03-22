@@ -69,11 +69,22 @@ sxmc api https://petstore3.swagger.io/api/v3/openapi.json findPetsByStatus statu
 Turn a CLI into startup-facing AI artifacts:
 
 ```bash
+sxmc doctor
 sxmc inspect cli gh --format toon
 sxmc inspect cli cargo --depth 1 --format json-pretty
 sxmc init ai --from-cli gh --coverage full --mode preview
 sxmc init ai --from-cli gh --coverage full --host claude-code,cursor,github-copilot --mode apply
 sxmc init ai --from-cli gh --coverage full --host claude-code --mode apply --remove
+```
+
+Use `sxmc` first when the surface is unknown:
+
+```bash
+sxmc inspect cli <tool> --depth 1 --format json-pretty
+sxmc stdio "<cmd>" --list
+sxmc mcp grep <pattern>
+sxmc api <url-or-spec> --list
+sxmc scan --paths <dir>
 ```
 
 Recent inspection hardening:
@@ -96,6 +107,7 @@ sxmc completions bash > ~/.local/share/bash-completion/completions/sxmc
 - `sxmc mcp grep "file"` searches across baked MCP servers, which is hard to reproduce cleanly with one-off tooling.
 - `sxmc scan` catches hidden Unicode, dangerous permissions, and prompt-injection patterns that plain `grep` misses.
 - `sxmc inspect cli ...` plus `sxmc init ai ...` turns per-host AI setup into generated, reviewable artifacts.
+- `sxmc doctor` makes the next move explicit for agents and humans: unknown CLI, unknown MCP server, unknown API, or startup setup.
 
 The current validation docs capture the real-world comparison set, token/turn estimates, and hidden retry-cost analysis.
 
@@ -108,6 +120,7 @@ The current validation docs capture the real-world comparison set, token/turn es
 - `sxmc api` / `sxmc spec` / `sxmc graphql`: API-to-CLI bridge
 - `sxmc scan`: security scanning for skills and MCP surfaces
 - `sxmc inspect` / `sxmc init` / `sxmc scaffold`: CLI-to-AI inspection and scaffolding
+- `sxmc doctor`: startup-discovery status plus recommended first commands
 - `sxmc bake`: saved connections
 - `sxmc completions`: shell completion generation
 

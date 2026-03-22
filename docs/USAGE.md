@@ -2,6 +2,7 @@
 
 The shortest path through `sxmc` is:
 
+- `doctor` to see startup-discovery status and the next best `sxmc` command
 - `serve` to publish skills as MCP
 - `mcp` for daily MCP client work against baked connections
 - `stdio` and `http` for raw or ad hoc MCP bridging
@@ -133,6 +134,17 @@ Network timeout notes:
 - if omitted, the underlying client default applies
 
 ## Turn CLIs Into AI Startup Surfaces
+
+If the surface is unknown, start here first:
+
+```bash
+sxmc doctor
+sxmc inspect cli <tool> --depth 1 --format json-pretty
+sxmc stdio "<cmd>" --list
+sxmc mcp grep <pattern>
+sxmc api <url-or-spec> --list
+sxmc scan --paths <dir>
+```
 
 Inspect a real CLI:
 
@@ -309,9 +321,12 @@ with bearer auth or required headers enabled on the server.
 If you maintain `AGENTS.md`, `CLAUDE.md`, or similar repo guidance, prefer
 teaching agents this pattern:
 
-1. search or list first
-2. inspect one tool with `sxmc mcp info`
-3. call one tool with `sxmc mcp call`
-4. use `sxmc mcp session <server>` when a tool expects multi-step state
-5. keep large output in files or pipes instead of pasting it into context
-6. parse stdout only for machine-readable output; informational `[sxmc]` lines go to stderr
+1. when the surface is unknown, run `sxmc doctor` and then use the matching `sxmc` bridge first
+2. use `sxmc inspect cli <tool> --depth 1` for unfamiliar CLIs
+3. use `sxmc api <url-or-spec> --list` before hand-constructing requests
+4. search or list first for MCP
+5. inspect one tool with `sxmc mcp info`
+6. call one tool with `sxmc mcp call`
+7. use `sxmc mcp session <server>` when a tool expects multi-step state
+8. keep large output in files or pipes instead of pasting it into context
+9. parse stdout only for machine-readable output; informational `[sxmc]` lines go to stderr

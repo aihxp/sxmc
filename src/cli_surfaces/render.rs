@@ -86,6 +86,18 @@ pub(crate) fn render_agent_doc(profile: &CliSurfaceProfile, client: AiClientProf
 
     lines.push(String::new());
     lines.push("Guidance:".into());
+    lines.push(
+        "- When the exact CLI surface is unclear, start with `sxmc inspect cli <tool> --depth 1 --format json-pretty` instead of pasting raw help output into chat."
+            .into(),
+    );
+    lines.push(
+        "- When the MCP surface is unknown, start with `sxmc stdio \"<cmd>\" --list` or `sxmc mcp grep <pattern>` before guessing tool calls."
+            .into(),
+    );
+    lines.push(
+        "- When the API surface is unknown, start with `sxmc api <url-or-spec> --list` before constructing requests by hand."
+            .into(),
+    );
     lines.push("- Keep bulky output in files or pipes when possible.".into());
     lines.push("- Prefer machine-friendly flags like `--json` when the CLI supports them.".into());
     lines.push("- Re-check `--help` before using low-confidence flows.".into());
@@ -117,10 +129,21 @@ pub(crate) fn render_portable_agent_doc(profile: &CliSurfaceProfile) -> String {
 
     lines.push(String::new());
     lines.push("Recommended startup guidance:".into());
+    lines.push(
+        "- When the exact CLI surface is unclear, start with `sxmc inspect cli <tool> --depth 1 --format json-pretty`."
+            .into(),
+    );
     lines.push(format!(
-        "- Start with `{}` `--help` when the exact command shape is unclear.",
+        "- For this CLI specifically, `{}` `--help` is still a good follow-up once you know you are on the right command.",
         profile.command
     ));
+    lines.push(
+        "- When the MCP surface is unknown, start with `sxmc stdio \"<cmd>\" --list` or `sxmc mcp grep <pattern>`."
+            .into(),
+    );
+    lines.push(
+        "- When the API surface is unknown, start with `sxmc api <url-or-spec> --list`.".into(),
+    );
     lines.push("- Prefer machine-friendly flags like `--json` when available.".into());
     lines.push(
         "- Keep bulky output in files or pipes instead of pasting it into chat context.".into(),

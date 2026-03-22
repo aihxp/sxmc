@@ -970,6 +970,133 @@ fn resolve_generation_root(root: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
+fn doctor_value(root: &std::path::Path) -> Result<Value> {
+    let bake_store = BakeStore::load()?;
+    let startup_targets = [
+        ("portable_agent_doc", root.join("AGENTS.md")),
+        ("claude_code", root.join("CLAUDE.md")),
+        ("gemini_cli", root.join("GEMINI.md")),
+        (
+            "cursor_rules",
+            root.join(".cursor").join("rules").join("sxmc-cli-ai.md"),
+        ),
+        (
+            "github_copilot",
+            root.join(".github").join("copilot-instructions.md"),
+        ),
+        (
+            "continue_dev",
+            root.join(".continue").join("rules").join("sxmc-cli-ai.md"),
+        ),
+        ("open_code", root.join("opencode.json")),
+        (
+            "jetbrains_ai_assistant",
+            root.join(".aiassistant")
+                .join("rules")
+                .join("sxmc-cli-ai.md"),
+        ),
+        ("junie", root.join(".junie").join("guidelines.md")),
+        (
+            "windsurf",
+            root.join(".windsurf").join("rules").join("sxmc-cli-ai.md"),
+        ),
+        ("openai_codex_agent_doc", root.join("AGENTS.md")),
+        ("openai_codex_mcp", root.join(".codex").join("mcp.toml")),
+        ("cursor_mcp", root.join(".cursor").join("mcp.json")),
+        ("gemini_mcp", root.join(".gemini").join("settings.json")),
+    ];
+
+    let startup_files = startup_targets
+        .into_iter()
+        .map(|(name, path)| {
+            (
+                name.to_string(),
+                json!({
+                    "path": path.display().to_string(),
+                    "present": path.exists(),
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+
+    Ok(json!({
+        "root": root.display().to_string(),
+        "baked_mcp_servers": bake_store.list().len(),
+        "portable_profile_dir": {
+            "path": root.join(".sxmc").join("ai").join("profiles").display().to_string(),
+            "present": root.join(".sxmc").join("ai").join("profiles").exists(),
+        },
+        "startup_files": startup_files,
+        "recommended_first_moves": [
+            {
+                "surface": "unknown_cli",
+                "command": "sxmc inspect cli <tool> --depth 1 --format json-pretty",
+                "why": "Get a structured profile instead of pasting raw help text into context."
+            },
+            {
+                "surface": "unknown_mcp_server",
+                "command": "sxmc stdio \"<cmd>\" --list",
+                "why": "Discover tools, prompts, and resources before guessing JSON-RPC calls."
+            },
+            {
+                "surface": "known_baked_mcp",
+                "command": "sxmc mcp grep <pattern>",
+                "why": "Search across baked MCP servers before opening every schema."
+            },
+            {
+                "surface": "unknown_api",
+                "command": "sxmc api <url-or-spec> --list",
+                "why": "List real operations from the live spec instead of hand-constructing URLs."
+            },
+            {
+                "surface": "startup_install",
+                "command": "sxmc init ai --from-cli <tool> --coverage full --mode preview",
+                "why": "Generate reviewable startup docs and host configs before applying them."
+            },
+            {
+                "surface": "suspicious_skill_or_repo",
+                "command": "sxmc scan --paths <dir>",
+                "why": "Check for prompt injection, secrets, Unicode tricks, and dangerous script patterns."
+            }
+        ]
+    }))
+}
+
+fn print_doctor_report(value: &Value) {
+    println!("Root: {}", value["root"].as_str().unwrap_or("<unknown>"));
+    println!(
+        "Baked MCP servers: {}",
+        value["baked_mcp_servers"].as_u64().unwrap_or(0)
+    );
+    println!();
+    println!("Startup files:");
+    if let Some(files) = value["startup_files"].as_object() {
+        let mut entries: Vec<_> = files.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, details) in entries {
+            let present = details["present"].as_bool().unwrap_or(false);
+            let path = details["path"].as_str().unwrap_or_default();
+            println!(
+                "- {}: {} ({})",
+                name,
+                if present { "present" } else { "missing" },
+                path
+            );
+        }
+    }
+    println!();
+    println!("Use sxmc first when the surface is unknown:");
+    if let Some(moves) = value["recommended_first_moves"].as_array() {
+        for item in moves {
+            let surface = item["surface"].as_str().unwrap_or("surface");
+            let command = item["command"].as_str().unwrap_or_default();
+            let why = item["why"].as_str().unwrap_or_default();
+            println!("- {}: `{}`", surface.replace('_', " "), command);
+            println!("  {}", why);
+        }
+    }
+}
+
 fn print_write_outcomes(outcomes: &[cli_surfaces::WriteOutcome]) {
     for outcome in outcomes {
         match outcome.mode {
@@ -1999,6 +2126,19 @@ async fn main() -> anyhow::Result<()> {
         Commands::Completions { shell } => {
             let mut command = Cli::command();
             generate(shell, &mut command, "sxmc", &mut std::io::stdout());
+        }
+        Commands::Doctor {
+            root,
+            pretty,
+            format,
+        } => {
+            let root = resolve_generation_root(root)?;
+            let value = doctor_value(&root)?;
+            if let Some(format) = output::prefer_structured_output(format, pretty) {
+                println!("{}", output::format_structured_value(&value, format));
+            } else {
+                print_doctor_report(&value);
+            }
         }
     }
 

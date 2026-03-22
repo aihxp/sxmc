@@ -8,6 +8,10 @@ echo '$ '"$BIN"' skills list --paths '"$FIXTURES"
 "$BIN" skills list --paths "$FIXTURES"
 echo
 
+echo '$ '"$BIN"' doctor'
+"$BIN" doctor
+echo
+
 echo '$ '"$BIN"' stdio "'"$BIN"' serve --paths '"$FIXTURES"'" --list-tools --limit 5'
 "$BIN" stdio "$BIN serve --paths $FIXTURES" --list-tools --limit 5
 echo

@@ -9,6 +9,7 @@ bash scripts/demo.sh target/debug/sxmc tests/fixtures
 ```
 
 That sequence covers:
+- startup-discovery / next-step guidance
 - skill discovery
 - `skills -> MCP -> CLI`
 - API listing
@@ -24,6 +25,7 @@ That sequence covers:
 ## Suggested Short Sequence
 
 1. `sxmc skills list --paths tests/fixtures`
-2. `sxmc stdio "sxmc serve --paths tests/fixtures" --list-tools --limit 5`
-3. `sxmc api https://petstore3.swagger.io/api/v3/openapi.json --list`
-4. `sxmc inspect cli gh --format toon`
+2. `sxmc doctor`
+3. `sxmc stdio "sxmc serve --paths tests/fixtures" --list-tools --limit 5`
+4. `sxmc api https://petstore3.swagger.io/api/v3/openapi.json --list`
+5. `sxmc inspect cli gh --format toon`
