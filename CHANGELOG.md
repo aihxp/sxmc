@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-03-22
+
 ### Added
 
 - `sxmc inspect batch` for multi-command CLI inspection in a single invocation
