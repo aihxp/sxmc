@@ -1,8 +1,8 @@
 class Sxmc < Formula
   desc "AI-agnostic Skills x MCP x CLI pipeline"
   homepage "https://github.com/aihxp/sxmc"
-  url "https://github.com/aihxp/sxmc/archive/refs/tags/v0.2.12.tar.gz"
-  sha256 "ace912f229fd56ad42a1fae50435282c54b301a1ed018dc8ffd98c73c0cac9d5"
+  url "https://github.com/aihxp/sxmc/archive/refs/tags/v0.2.13.tar.gz"
+  sha256 "13df5ce06ad8987bb9e64c181bbe67d6f14c007611c96ca8d8460eebff79b23b"
   license "MIT"
   head "https://github.com/aihxp/sxmc.git", branch: "master"
 
