@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc inspect batch` for multi-command CLI inspection in a single invocation
+- `sxmc inspect cache-stats` for profile-cache inventory and size visibility
+- `sxmc doctor --human` to force the readable startup report off-TTY
+
+### Changed
+
+- `scripts/test-sxmc.sh` is now part of release certification and Unix CI coverage
+- CI now explicitly validates Ubuntu, macOS, and Windows product paths, including Windows smoke checks for `doctor`, compact inspection, and cache stats
+- human `doctor` output now includes cache entry counts and size in addition to startup-file and next-step guidance
+
 ## [0.2.12] - 2026-03-22
 
 ### Changed

@@ -139,8 +139,11 @@ If the surface is unknown, start here first:
 
 ```bash
 sxmc doctor
+sxmc doctor --human
 sxmc inspect cli <tool> --depth 1 --format json-pretty
 sxmc inspect cli <tool> --depth 2 --compact --format json-pretty
+sxmc inspect batch git cargo brew --compact --format json-pretty
+sxmc inspect cache-stats --format json-pretty
 sxmc stdio "<cmd>" --list
 sxmc mcp grep <pattern>
 sxmc api <url-or-spec> --list
@@ -156,6 +159,8 @@ sxmc inspect cli gh --format toon
 sxmc inspect cli curl --compact --format json-pretty
 sxmc inspect cli cargo --depth 1 --format json-pretty
 sxmc inspect cli gh --depth 2 --compact --format json-pretty
+sxmc inspect batch git cargo brew --compact --format json-pretty
+sxmc inspect cache-stats --format json-pretty
 ```
 
 Important:
@@ -164,6 +169,17 @@ Important:
   actual executable on `PATH` or an explicit path to a binary/script.
 - shell aliases and shell functions from an interactive session are not visible
   to `sxmc` subprocess execution.
+
+Notes:
+
+- `sxmc doctor` defaults to a human-readable report on a real terminal and
+  structured JSON when stdout is piped or redirected.
+- `sxmc doctor --human` forces the readable report even when you are capturing
+  output off-TTY.
+- `sxmc inspect batch ...` keeps partial failures in a `failures` array instead
+  of failing the whole run on the first missing command.
+- `sxmc inspect cache-stats` shows cache path, entry count, size, and default
+  TTL so repeated inspection behavior is visible.
 
 Generate startup-facing artifacts for a host profile:
 

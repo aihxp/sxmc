@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use anyhow::Result as AnyhowResult;
-
 use sxmc::client::api;
 use sxmc::error::Result;
 use sxmc::output;
@@ -127,7 +125,7 @@ pub async fn cmd_api(
     search: Option<&str>,
     pretty: bool,
     format: Option<output::StructuredOutputFormat>,
-) -> AnyhowResult<()> {
+) -> Result<()> {
     if list || search.is_some() {
         if let Some(format) = output::prefer_structured_output(format, pretty) {
             println!(

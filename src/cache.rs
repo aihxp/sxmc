@@ -5,6 +5,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SxmcError};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheStats {
+    pub path: PathBuf,
+    pub entry_count: usize,
+    pub total_bytes: u64,
+    pub default_ttl_secs: u64,
+}
+
 /// A file-based cache with TTL support.
 /// Stores entries in ~/.cache/sxmc/
 pub struct Cache {
@@ -99,6 +107,36 @@ impl Cache {
         Ok(())
     }
 
+    /// Return summary information about the cache directory.
+    pub fn stats(&self) -> Result<CacheStats> {
+        let mut entry_count = 0usize;
+        let mut total_bytes = 0u64;
+
+        if self.dir.exists() {
+            for entry in std::fs::read_dir(&self.dir)
+                .map_err(|e| SxmcError::Other(format!("Failed to read cache dir: {}", e)))?
+                .flatten()
+            {
+                let path = entry.path();
+                if path.is_file() {
+                    entry_count += 1;
+                    total_bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+                }
+            }
+        }
+
+        Ok(CacheStats {
+            path: self.dir.clone(),
+            entry_count,
+            total_bytes,
+            default_ttl_secs: self.default_ttl.as_secs(),
+        })
+    }
+
+    pub fn dir(&self) -> &PathBuf {
+        &self.dir
+    }
+
     fn key_path(&self, key: &str) -> PathBuf {
         // Hash the key for safe filenames
         use std::collections::hash_map::DefaultHasher;
@@ -137,5 +175,19 @@ mod tests {
         // Sleep over 1 second to ensure the second-granularity timestamp advances
         std::thread::sleep(std::time::Duration::from_millis(1100));
         assert_eq!(cache.get(key), None);
+    }
+
+    #[test]
+    fn test_cache_stats_reports_entries() {
+        let cache = Cache::new(3600).unwrap();
+        let key = "test_cache_stats_reports_entries";
+        cache.set(key, "hello world").unwrap();
+
+        let stats = cache.stats().unwrap();
+        assert!(stats.entry_count >= 1);
+        assert!(stats.total_bytes > 0);
+        assert_eq!(stats.default_ttl_secs, 3600);
+
+        cache.remove(key);
     }
 }

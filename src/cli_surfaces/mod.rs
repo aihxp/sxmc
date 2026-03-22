@@ -4,8 +4,8 @@ mod model;
 mod render;
 
 pub use inspect::{
-    compact_profile_value, inspect_cli, inspect_cli_with_depth, load_profile, parse_command_spec,
-    profile_value,
+    cache_stats_value, compact_profile_value, inspect_cli, inspect_cli_batch,
+    inspect_cli_with_depth, load_profile, parse_command_spec, profile_value,
 };
 pub use materialize::{
     generate_agent_doc_artifact, generate_client_config_artifact,

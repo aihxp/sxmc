@@ -81,6 +81,40 @@ pub fn inspect_cli(command_spec: &str, allow_self: bool) -> Result<CliSurfacePro
     inspect_cli_with_depth(command_spec, allow_self, 0)
 }
 
+pub fn inspect_cli_batch(command_specs: &[String], allow_self: bool, depth: usize) -> Value {
+    let mut profiles = Vec::new();
+    let mut failures = Vec::new();
+
+    for command_spec in command_specs {
+        match inspect_cli_with_depth(command_spec, allow_self, depth) {
+            Ok(profile) => profiles.push(profile_value(&profile)),
+            Err(error) => failures.push(json!({
+                "command": command_spec,
+                "error": error.to_string(),
+            })),
+        }
+    }
+
+    json!({
+        "count": command_specs.len(),
+        "success_count": profiles.len(),
+        "failed_count": failures.len(),
+        "profiles": profiles,
+        "failures": failures,
+    })
+}
+
+pub fn cache_stats_value() -> Result<Value> {
+    let cache = Cache::new(CLI_PROFILE_CACHE_TTL_SECS)?;
+    let stats = cache.stats()?;
+    Ok(json!({
+        "path": stats.path.display().to_string(),
+        "entry_count": stats.entry_count,
+        "total_bytes": stats.total_bytes,
+        "default_ttl_secs": stats.default_ttl_secs,
+    }))
+}
+
 pub fn inspect_cli_with_depth(
     command_spec: &str,
     allow_self: bool,

@@ -60,6 +60,21 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+      - name: Run comprehensive sxmc script (Unix)
+        if: runner.os != 'Windows'
+        run: SXMC=target/debug/sxmc bash scripts/test-sxmc.sh --json /tmp/sxmc-test-results.json
+
+      - name: Windows validation smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $doctor = target\debug\sxmc.exe doctor --format json | ConvertFrom-Json
+          if (-not $doctor.root) { throw "doctor JSON missing root" }
+          $compact = target\debug\sxmc.exe inspect cli cargo --compact --format json | ConvertFrom-Json
+          if (-not $compact.subcommand_count) { throw "compact inspect missing subcommand_count" }
+          $cache = target\debug\sxmc.exe inspect cache-stats --format json | ConvertFrom-Json
+          if ($null -eq $cache.entry_count) { throw "cache stats missing entry_count" }
+
   smoke:
     runs-on: ubuntu-latest
 

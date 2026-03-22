@@ -70,10 +70,13 @@ Turn a CLI into startup-facing AI artifacts:
 
 ```bash
 sxmc doctor
+sxmc doctor --human
 sxmc inspect cli gh --format toon
 sxmc inspect cli curl --compact --format json-pretty
 sxmc inspect cli cargo --depth 1 --format json-pretty
 sxmc inspect cli gh --depth 2 --compact --format json-pretty
+sxmc inspect batch git cargo brew --compact --format json-pretty
+sxmc inspect cache-stats --format json-pretty
 sxmc init ai --from-cli gh --coverage full --mode preview
 sxmc init ai --from-cli gh --coverage full --host claude-code,cursor,github-copilot --mode apply
 sxmc init ai --from-cli gh --coverage full --host claude-code --mode apply --remove
@@ -115,6 +118,8 @@ sxmc completions bash > ~/.local/share/bash-completion/completions/sxmc
 - `sxmc scan` catches hidden Unicode, dangerous permissions, and prompt-injection patterns that plain `grep` misses.
 - `sxmc inspect cli ...` plus `sxmc init ai ...` turns per-host AI setup into generated, reviewable artifacts.
 - `sxmc doctor` makes the next move explicit for agents and humans: unknown CLI, unknown MCP server, unknown API, local skills you want to serve, or startup setup.
+- `sxmc inspect batch ...` amortizes inspection startup when you need several CLI profiles in one pass.
+- `sxmc inspect cache-stats` exposes profile-cache size and entry counts so repeated agent lookups are observable instead of opaque.
 
 The current validation docs capture the real-world comparison set, token/turn estimates, and hidden retry-cost analysis.
 
@@ -128,6 +133,8 @@ The current validation docs capture the real-world comparison set, token/turn es
 - `sxmc scan`: security scanning for skills and MCP surfaces
 - `sxmc inspect` / `sxmc init` / `sxmc scaffold`: CLI-to-AI inspection and scaffolding
 - `sxmc doctor`: startup-discovery status plus recommended first commands
+- `sxmc inspect batch`: inspect several CLIs in one invocation
+- `sxmc inspect cache-stats`: inspect cached profile inventory and size
 - `sxmc bake`: saved connections
 - `sxmc completions`: shell completion generation
 
@@ -139,9 +146,11 @@ The current validation docs capture the real-world comparison set, token/turn es
 - recursive CLI inspection with `sxmc inspect cli --depth 1`
 - deeper recursive CLI exploration is available with larger values like `--depth 2` for multi-layer CLIs such as `gh`
 - compact CLI inspection with `sxmc inspect cli --compact` for lower-context summaries
+- batch CLI inspection with `sxmc inspect batch ...` when you need several profiles in one shot
 - interactive inspections now emit lightweight stderr progress notes on cache misses and slower supplemental probes
 - generated docs and skill scaffolds now surface larger CLI inventories with counts instead of hiding everything after the first few subcommands
 - CLI inspection profiles are cached so repeated agent lookups do not keep reparsing unchanged binaries
+- cache inventory is visible with `sxmc inspect cache-stats`
 - cleanup support with `sxmc init ai --remove`
 - CLI inspection now supplements sparse help output with `man` pages without clobbering richer `--help` surfaces
 - atomic bake persistence

@@ -6,6 +6,7 @@ use clap_complete::generate;
 use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
 use serde_json::{json, Value};
 use std::io::BufRead;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -972,6 +973,7 @@ fn resolve_generation_root(root: Option<PathBuf>) -> Result<PathBuf> {
 
 fn doctor_value(root: &std::path::Path) -> Result<Value> {
     let bake_store = BakeStore::load()?;
+    let cache_stats = sxmc::cache::Cache::new(60 * 60 * 24 * 14)?.stats()?;
     let startup_targets = [
         ("portable_agent_doc", root.join("AGENTS.md")),
         ("claude_code", root.join("CLAUDE.md")),
@@ -1026,6 +1028,12 @@ fn doctor_value(root: &std::path::Path) -> Result<Value> {
             "path": root.join(".sxmc").join("ai").join("profiles").display().to_string(),
             "present": root.join(".sxmc").join("ai").join("profiles").exists(),
         },
+        "cache": {
+            "path": cache_stats.path.display().to_string(),
+            "entry_count": cache_stats.entry_count,
+            "total_bytes": cache_stats.total_bytes,
+            "default_ttl_secs": cache_stats.default_ttl_secs,
+        },
         "startup_files": startup_files,
         "recommended_first_moves": [
             {
@@ -1067,6 +1075,19 @@ fn doctor_value(root: &std::path::Path) -> Result<Value> {
     }))
 }
 
+fn should_render_doctor_human(
+    human: bool,
+    format: Option<output::StructuredOutputFormat>,
+    pretty: bool,
+    stdout_is_tty: bool,
+) -> bool {
+    if human {
+        return true;
+    }
+
+    format.is_none() && !pretty && stdout_is_tty
+}
+
 fn print_doctor_report(value: &Value) {
     let startup_files = value["startup_files"].as_object();
     let startup_total = startup_files.map(|files| files.len()).unwrap_or(0);
@@ -1084,6 +1105,10 @@ fn print_doctor_report(value: &Value) {
     let portable_profiles_path = value["portable_profile_dir"]["path"]
         .as_str()
         .unwrap_or_default();
+    let cache_path = value["cache"]["path"].as_str().unwrap_or_default();
+    let cache_entries = value["cache"]["entry_count"].as_u64().unwrap_or(0);
+    let cache_total_bytes = value["cache"]["total_bytes"].as_u64().unwrap_or(0);
+    let cache_ttl_hours = value["cache"]["default_ttl_secs"].as_u64().unwrap_or(0) / 3600;
 
     println!("Root: {}", value["root"].as_str().unwrap_or("<unknown>"));
     println!(
@@ -1099,6 +1124,11 @@ fn print_doctor_report(value: &Value) {
         },
         portable_profiles_path
     );
+    println!(
+        "CLI profile cache: {} entries, {} bytes (TTL: {}h)",
+        cache_entries, cache_total_bytes, cache_ttl_hours
+    );
+    println!("Cache path: {}", cache_path);
     println!("Startup files present: {startup_present}/{startup_total}");
     println!();
     println!("Startup files:");
@@ -1146,6 +1176,69 @@ fn print_doctor_report(value: &Value) {
             println!("   {}", why);
         }
     }
+}
+
+fn print_batch_inspect_report(value: &Value, compact: bool) {
+    let count = value["count"].as_u64().unwrap_or(0);
+    let success_count = value["success_count"].as_u64().unwrap_or(0);
+    let failed_count = value["failed_count"].as_u64().unwrap_or(0);
+    println!(
+        "Inspected {} command(s): {} succeeded, {} failed",
+        count, success_count, failed_count
+    );
+
+    if let Some(profiles) = value["profiles"].as_array() {
+        for profile in profiles {
+            let command = profile["command"].as_str().unwrap_or("<unknown>");
+            let summary = profile["summary"].as_str().unwrap_or_default();
+            if compact {
+                let subcommand_count = profile["subcommand_count"].as_u64().unwrap_or(0);
+                let option_count = profile["option_count"].as_u64().unwrap_or(0);
+                println!(
+                    "- {}: {} ({} subcommands, {} options)",
+                    command, summary, subcommand_count, option_count
+                );
+            } else {
+                let subcommand_count = profile["subcommands"]
+                    .as_array()
+                    .map(|items| items.len())
+                    .unwrap_or(0);
+                let option_count = profile["options"]
+                    .as_array()
+                    .map(|items| items.len())
+                    .unwrap_or(0);
+                println!(
+                    "- {}: {} ({} subcommands, {} options)",
+                    command, summary, subcommand_count, option_count
+                );
+            }
+        }
+    }
+
+    if let Some(failures) = value["failures"].as_array() {
+        if !failures.is_empty() {
+            println!();
+            println!("Failures:");
+            for failure in failures {
+                println!(
+                    "- {}: {}",
+                    failure["command"].as_str().unwrap_or("<unknown>"),
+                    failure["error"].as_str().unwrap_or("unknown error")
+                );
+            }
+        }
+    }
+}
+
+fn print_cache_stats_report(value: &Value) {
+    println!("CLI profile cache");
+    println!("Path: {}", value["path"].as_str().unwrap_or("<unknown>"));
+    println!("Entries: {}", value["entry_count"].as_u64().unwrap_or(0));
+    println!("Size: {} bytes", value["total_bytes"].as_u64().unwrap_or(0));
+    println!(
+        "Default TTL: {} seconds",
+        value["default_ttl_secs"].as_u64().unwrap_or(0)
+    );
 }
 
 async fn validate_bake_config(config: &BakeConfig) -> Result<()> {
@@ -1257,6 +1350,16 @@ fn augment_bake_validation_message(config: &BakeConfig, base: &str, detail: &str
             if config.source.contains("npx") {
                 hints.push("If this is an npm MCP server, verify the package name manually with `npx ... --help` or install it globally before baking it.".to_string());
             }
+            if config.source.contains("python")
+                || config.source.contains(".py")
+                || config.source.contains("uv ")
+                || config.source.contains("uvx ")
+            {
+                hints.push("For Python-backed servers, confirm the virtualenv or tool runner is available in the same environment where sxmc will execute the bake.".to_string());
+            }
+            if config.source.contains("docker") || config.source.contains("podman") {
+                hints.push("For container-backed servers, confirm the image exists locally and that the command keeps stdin/stdout attached for MCP traffic.".to_string());
+            }
         }
         SourceType::Http => {
             hints.push("Check that the HTTP MCP server is already running and that the URL points at its streamable MCP endpoint (often `/mcp`).".to_string());
@@ -1282,6 +1385,12 @@ fn augment_bake_validation_message(config: &BakeConfig, base: &str, detail: &str
             {
                 hints.push("The API rejected auth during validation. Re-check tokens, headers, and whether the endpoint expects a different auth scheme.".to_string());
             }
+            if !config.source.ends_with(".json")
+                && !config.source.ends_with(".yaml")
+                && !config.source.ends_with(".yml")
+            {
+                hints.push("If this is an API docs page rather than a machine-readable spec, bake the raw OpenAPI URL instead of the human HTML page.".to_string());
+            }
         }
         SourceType::Spec => {
             hints.push("Confirm the OpenAPI document URL/file is valid JSON or YAML and reachable from this machine.".to_string());
@@ -1299,6 +1408,12 @@ fn augment_bake_validation_message(config: &BakeConfig, base: &str, detail: &str
                 || lowered.contains("unauthorized")
             {
                 hints.push("The GraphQL endpoint rejected auth during validation. Re-check tokens and headers.".to_string());
+            }
+            if lowered.contains("introspection")
+                || lowered.contains("schema")
+                || lowered.contains("field")
+            {
+                hints.push("If introspection is disabled in production, validate against a staging/schema endpoint or save the bake with `--skip-validate` until a schema source is available.".to_string());
             }
         }
     }
@@ -1532,7 +1647,7 @@ fn resolve_cli_ai_client_config_artifacts(
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -2071,6 +2186,50 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", output::format_structured_value(&value, format));
                 }
             }
+            InspectAction::Batch {
+                commands,
+                depth,
+                compact,
+                pretty,
+                format,
+                allow_self,
+            } => {
+                if commands.is_empty() {
+                    return Err(sxmc::error::SxmcError::Other(
+                        "inspect batch requires at least one command spec".into(),
+                    ));
+                }
+                let value = cli_surfaces::inspect_cli_batch(&commands, allow_self, depth);
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    let rendered = if compact {
+                        let compact_profiles = value["profiles"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|profile| {
+                                serde_json::from_value::<cli_surfaces::CliSurfaceProfile>(
+                                    profile.clone(),
+                                )
+                                .ok()
+                            })
+                            .map(|profile| cli_surfaces::compact_profile_value(&profile))
+                            .collect::<Vec<_>>();
+                        let compact_value = json!({
+                            "count": value["count"],
+                            "success_count": value["success_count"],
+                            "failed_count": value["failed_count"],
+                            "profiles": compact_profiles,
+                            "failures": value["failures"],
+                        });
+                        output::format_structured_value(&compact_value, format)
+                    } else {
+                        output::format_structured_value(&value, format)
+                    };
+                    println!("{rendered}");
+                } else {
+                    print_batch_inspect_report(&value, compact);
+                }
+            }
             InspectAction::Profile {
                 input,
                 compact,
@@ -2088,6 +2247,14 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     let format = output::resolve_structured_format(format, pretty);
                     println!("{}", output::format_structured_value(&value, format));
+                }
+            }
+            InspectAction::CacheStats { pretty, format } => {
+                let value = cli_surfaces::cache_stats_value()?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    print_cache_stats_report(&value);
                 }
             }
         },
@@ -2367,15 +2534,19 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Doctor {
             root,
+            human,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
             let value = doctor_value(&root)?;
-            if let Some(format) = output::prefer_structured_output(format, pretty) {
+            if should_render_doctor_human(human, format, pretty, std::io::stdout().is_terminal()) {
+                print_doctor_report(&value);
+            } else if let Some(format) = output::prefer_structured_output(format, pretty) {
                 println!("{}", output::format_structured_value(&value, format));
             } else {
-                print_doctor_report(&value);
+                let format = output::resolve_structured_format(format, pretty);
+                println!("{}", output::format_structured_value(&value, format));
             }
         }
     }
@@ -2387,9 +2558,10 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::{
         annotate_mcp_tool_call_error, is_capability_not_supported, list_optional_surface,
-        looks_like_argument_shape_error, McpSurface,
+        looks_like_argument_shape_error, should_render_doctor_human, McpSurface,
     };
     use sxmc::error::SxmcError;
+    use sxmc::output::StructuredOutputFormat;
 
     #[test]
     fn detects_json_rpc_method_not_found_as_optional_capability_gap() {
@@ -2403,6 +2575,27 @@ mod tests {
     fn detects_textual_not_supported_errors() {
         let error = SxmcError::McpError("list_resources failed: capability not supported".into());
         assert!(is_capability_not_supported(&error));
+    }
+
+    #[test]
+    fn doctor_prefers_human_when_tty_and_no_structured_flags() {
+        assert!(should_render_doctor_human(false, None, false, true));
+    }
+
+    #[test]
+    fn doctor_prefers_json_when_not_tty() {
+        assert!(!should_render_doctor_human(false, None, false, false));
+    }
+
+    #[test]
+    fn doctor_human_flag_overrides_non_tty() {
+        assert!(!should_render_doctor_human(
+            false,
+            Some(StructuredOutputFormat::Json),
+            false,
+            true
+        ));
+        assert!(should_render_doctor_human(true, None, false, false));
     }
 
     #[test]

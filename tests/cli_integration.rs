@@ -251,6 +251,45 @@ fn test_doctor_reports_recommended_first_moves_as_json_off_tty() {
 }
 
 #[test]
+fn test_doctor_human_flag_renders_report() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("AGENTS.md"), "# Existing\n").unwrap();
+
+    sxmc()
+        .args(["doctor", "--human", "--root", temp.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Startup files present"))
+        .stdout(predicate::str::contains("Recommended first moves"))
+        .stdout(predicate::str::contains("CLI profile cache"));
+}
+
+#[test]
+fn test_inspect_cache_stats_reports_entries() {
+    let value = command_json(&["inspect", "cache-stats"]);
+    assert!(value["path"].as_str().unwrap_or_default().contains("sxmc"));
+    assert!(value["default_ttl_secs"].as_u64().unwrap_or(0) > 0);
+}
+
+#[test]
+fn test_inspect_batch_returns_profiles_and_failures() {
+    let value = command_json(&[
+        "inspect",
+        "batch",
+        "cargo",
+        "this-command-should-not-exist-xyz",
+    ]);
+    assert_eq!(value["count"], Value::from(2));
+    assert!(value["success_count"].as_u64().unwrap_or(0) >= 1);
+    assert!(value["failed_count"].as_u64().unwrap_or(0) >= 1);
+    assert!(value["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|profile| profile["command"] == "cargo"));
+}
+
+#[test]
 fn test_inspect_cli_compact_output_reduces_profile_shape() {
     let value = command_json(&["inspect", "cli", "cargo", "--compact"]);
     assert_eq!(value["command"], "cargo");

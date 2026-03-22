@@ -17,6 +17,7 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 cargo package --allow-dirty
 bash scripts/certify_release.sh target/debug/sxmc tests/fixtures
+SXMC=target/debug/sxmc bash scripts/test-sxmc.sh --json /tmp/sxmc-test-results.json
 ```
 
 Optional real-world MCP pass when Node and network are available:
@@ -31,6 +32,7 @@ The maintained product coverage now centers on three layers:
 
 - automated tests in `cargo test`
 - release certification via `scripts/certify_release.sh`
+- comprehensive CLI/user-path coverage via `scripts/test-sxmc.sh`
 - optional real-world MCP smoke via `scripts/smoke_real_world_mcps.sh`
 
 High-value scenarios covered in this stack include:
@@ -46,6 +48,21 @@ High-value scenarios covered in this stack include:
 - promptless or resource-less third-party MCP servers
 - zero-argument tool interoperability
 - CLI inspection, startup artifact preview, managed doc apply, and Cursor config merge coverage
+- doctor JSON and human-mode coverage
+- cache statistics and batch CLI inspection coverage
+
+## CI Matrix
+
+The repo now validates `sxmc` as a cross-platform product path instead of only a
+Rust crate:
+
+- Ubuntu: `cargo test`, startup smoke, and `scripts/test-sxmc.sh`
+- macOS: `cargo test`, startup smoke, and `scripts/test-sxmc.sh`
+- Windows: `cargo test` plus explicit smoke for `doctor`, compact inspection,
+  and cache-stats JSON output
+
+That keeps the larger Unix-oriented validation script in the loop while still
+exercising Windows-specific command paths in CI.
 
 ## Compatibility Notes
 

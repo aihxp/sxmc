@@ -373,6 +373,10 @@ pub enum Commands {
         #[arg(long)]
         root: Option<PathBuf>,
 
+        /// Force the human-readable report even when stdout is not a TTY
+        #[arg(long)]
+        human: bool,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -448,10 +452,29 @@ pub enum InspectAction {
         #[arg(long)]
         allow_self: bool,
     },
+    Batch {
+        commands: Vec<String>,
+        #[arg(long, default_value_t = 0)]
+        depth: usize,
+        #[arg(long)]
+        compact: bool,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+        #[arg(long)]
+        allow_self: bool,
+    },
     Profile {
         input: PathBuf,
         #[arg(long)]
         compact: bool,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    CacheStats {
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]

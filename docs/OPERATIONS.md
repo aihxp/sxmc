@@ -45,6 +45,7 @@ Before a release:
 3. confirm `Cargo.toml` and packaging metadata are aligned
 4. confirm `README.md` matches the current public surface
 5. confirm the architecture and usage docs still match the shipped command set
+6. confirm `scripts/test-sxmc.sh` is green against the release candidate binary
 
 Release steps:
 
@@ -62,6 +63,13 @@ Release cadence policy:
 - batch related changes into meaningful versions
 - avoid rapid-fire public releases unless you are correcting a broken published release
 - prefer validating the full docs, packaging, and smoke path once per release instead of shipping every intermediate checkpoint
+
+Cross-platform release confidence:
+
+- GitHub Actions runs Ubuntu, macOS, and Windows test lanes on `master`
+- Unix CI lanes run `scripts/test-sxmc.sh` against the built debug binary
+- Windows CI validates `doctor`, compact inspection, and cache stats through
+  PowerShell JSON checks in addition to `cargo test`
 
 ## Distribution
 
