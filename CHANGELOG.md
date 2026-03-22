@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-03-22
+
+### Changed
+
+- CLI inspection now avoids treating man-page prose and interactive command tables as top-level CLI subcommands, which removes false positives for tools like `cat`, `lsof`, and `dc`
+- summary selection now prefers real command descriptions over vendor banners, bug-report lines, option tables, and overstrike-formatted help text, which cleans up tools like `lsof`, `gzip`, `man`, `ping`, `dig`, `less`, and `more`
+- `brew` inspection now supplements `--help` with `brew commands`, recovering a much broader real command set without carrying over the giant manual-page option wall
+- help/man detection is stricter, so ordinary clap-style help for tools like `cargo` and `sxmc` is no longer mistaken for man-page output
+- parser regression coverage now includes man-example false positives, title-case `Name` sections, overstrike stripping, and command-name description lines
+
 ## [0.2.6] - 2026-03-22
 
 ### Changed
