@@ -354,6 +354,19 @@ fn test_inspect_batch_from_toml_supports_structured_tools() {
 }
 
 #[test]
+fn test_inspect_batch_since_accepts_rfc3339_timestamp() {
+    let value = command_json(&[
+        "inspect",
+        "batch",
+        "cargo",
+        "--since",
+        "1970-01-01T00:00:00Z",
+    ]);
+    assert_eq!(value["count"], Value::from(1));
+    assert_eq!(value["inspected_count"], Value::from(1));
+}
+
+#[test]
 fn test_inspect_batch_toon_is_summary_oriented() {
     sxmc()
         .args(["inspect", "batch", "cargo", "--format", "toon"])
@@ -491,6 +504,28 @@ fn test_doctor_fix_repairs_selected_hosts() {
         .join("rules")
         .join("sxmc-cli-ai.md")
         .exists());
+
+    let rerun = sxmc()
+        .args([
+            "doctor",
+            "--check",
+            "--fix",
+            "--allow-low-confidence",
+            "--only",
+            "claude-code,cursor",
+            "--from-cli",
+            fake.to_str().unwrap(),
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--human",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let rerun_stdout = String::from_utf8_lossy(&rerun);
+    assert!(rerun_stdout.contains("Skipped unchanged"));
 }
 
 #[test]
@@ -587,6 +622,52 @@ fn test_inspect_diff_reports_changes_against_saved_profile() {
         .unwrap()
         .iter()
         .any(|entry| entry == "--json"));
+}
+
+#[test]
+fn test_inspect_diff_rejects_compact_profiles_with_specific_guidance() {
+    let temp = tempfile::tempdir().unwrap();
+    let before = command_stdout(&["inspect", "cli", "cargo", "--compact"]);
+    let before_path = temp.path().join("before-compact.json");
+    fs::write(&before_path, before).unwrap();
+
+    sxmc()
+        .args([
+            "inspect",
+            "diff",
+            "cargo",
+            "--before",
+            before_path.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Compact profiles cannot be diffed",
+        ))
+        .stderr(predicate::str::contains("without `--compact`"));
+}
+
+#[test]
+fn test_inspect_diff_toon_is_human_oriented() {
+    let temp = tempfile::tempdir().unwrap();
+    let before = command_stdout(&["inspect", "cli", "cargo", "--pretty"]);
+    let before_path = temp.path().join("before.json");
+    fs::write(&before_path, before).unwrap();
+
+    sxmc()
+        .args([
+            "inspect",
+            "diff",
+            "cargo",
+            "--before",
+            before_path.to_str().unwrap(),
+            "--format",
+            "toon",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("command: cargo"))
+        .stdout(predicate::str::contains("summary_changed:"));
 }
 
 #[test]

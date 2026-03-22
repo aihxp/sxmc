@@ -367,6 +367,15 @@ pub struct WriteOutcome {
     pub label: String,
     pub path: PathBuf,
     pub mode: ArtifactMode,
+    pub status: WriteStatus,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum WriteStatus {
+    Created,
+    Updated,
+    Skipped,
+    Removed,
 }
 
 pub fn host_profile_spec(client: AiClientProfile) -> &'static HostProfileSpec {

@@ -501,6 +501,15 @@ pub fn load_profile(path: &Path) -> Result<CliSurfaceProfile> {
         .and_then(Value::as_str)
         .unwrap_or_default();
     if schema != PROFILE_SCHEMA {
+        let looks_compact = value.get("subcommand_count").is_some()
+            || value.get("option_count").is_some()
+            || value.get("generator_version").is_some();
+        if looks_compact {
+            return Err(SxmcError::Other(format!(
+                "Profile file '{}' looks like a compact sxmc CLI profile. Compact profiles cannot be diffed or reloaded as full CLI surface profiles. Save the full profile with `sxmc inspect cli <tool> --format json-pretty` (without `--compact`).",
+                path.display()
+            )));
+        }
         return Err(SxmcError::Other(format!(
             "Profile file '{}' is not a valid sxmc CLI surface profile. Expected `profile_schema: {}` from `sxmc inspect cli <tool> --format json-pretty`.",
             path.display(),

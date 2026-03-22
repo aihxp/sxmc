@@ -821,7 +821,7 @@ else
 fi
 
 printf 'git\nls\n' > "$TMPDIR_TEST/tools.txt"
-printf 'cargo\n# comment\n   \n git \n' > "$TMPDIR_TEST/tools-with-comments.txt"
+printf 'sed\n# comment\n   \n git \n' > "$TMPDIR_TEST/tools-with-comments.txt"
 
 batch_out=$("$SXMC" inspect batch git cargo this-command-should-not-exist-xyz --parallel 4 --progress 2>/dev/null)
 if json_check "$batch_out" "d.get('count', 0) == 3"; then
@@ -858,7 +858,7 @@ fi
 
 cat > "$TMPDIR_TEST/tools.yaml" <<EOF
 tools:
-  - command: cargo
+  - command: curl
     depth: 1
   - command: git
 EOF
@@ -871,7 +871,7 @@ fi
 
 cat > "$TMPDIR_TEST/tools.toml" <<EOF
 tools = [
-  { command = "cargo", depth = 1 },
+  { command = "curl", depth = 1 },
   { command = "git" }
 ]
 EOF
@@ -880,6 +880,13 @@ if json_check "$batch_from_toml" "d.get('count', 0) == 2 and d.get('failed_count
   pass "inspect batch --from-file supports TOML"
 else
   fail "inspect batch --from-file TOML" "${batch_from_toml:0:120}"
+fi
+
+batch_since_rfc3339=$("$SXMC" inspect batch cargo --since 1970-01-01T00:00:00Z 2>/dev/null)
+if json_check "$batch_since_rfc3339" "d.get('count', 0) == 1 and d.get('inspected_count', 0) == 1"; then
+  pass "inspect batch --since accepts RFC3339"
+else
+  fail "inspect batch --since RFC3339" "${batch_since_rfc3339:0:120}"
 fi
 
 cache_stats=$("$SXMC" inspect cache-stats 2>/dev/null)
@@ -947,8 +954,24 @@ if has_cmd git; then
   else
     fail "inspect diff" "${diff_out:0:120}"
   fi
+
+  diff_toon=$("$SXMC" inspect diff git --before "$before_profile" --format toon 2>/dev/null)
+  if echo "$diff_toon" | grep -q "command: git" && echo "$diff_toon" | grep -q "summary_changed:"; then
+    pass "inspect diff --format toon is human-oriented"
+  else
+    fail "inspect diff --format toon" "${diff_toon:0:120}"
+  fi
 else
   skip "inspect diff" "git not installed"
+fi
+
+compact_before="$TMPDIR_TEST/cargo-before-compact.json"
+"$SXMC" inspect cli cargo --compact > "$compact_before"
+compact_diff_err=$("$SXMC" inspect diff cargo --before "$compact_before" 2>&1 || true)
+if echo "$compact_diff_err" | grep -q "Compact profiles cannot be diffed"; then
+  pass "inspect diff explains compact-profile limitation"
+else
+  fail "inspect diff compact guidance" "${compact_diff_err:0:120}"
 fi
 
 # ============================================================================

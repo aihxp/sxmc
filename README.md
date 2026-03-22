@@ -80,7 +80,9 @@ sxmc inspect cli gh --depth 2 --compact --format json-pretty
 sxmc inspect batch git cargo brew --parallel 4 --compact --format json-pretty
 sxmc inspect batch --from-file tools.txt --compact --format json-pretty
 sxmc inspect batch --from-file tools.yaml --since 2026-03-22T00:00:00Z
+sxmc inspect batch --from-file tools.yaml --compact  # nested depth shows up as nested_profile_count
 sxmc inspect diff git --before before.json --format json-pretty
+sxmc inspect diff git --before before.json --format toon
 sxmc inspect cache-stats --format json-pretty
 sxmc inspect cache-invalidate cargo --format json-pretty
 sxmc inspect cache-invalidate 'g*' --dry-run --format json-pretty
@@ -120,6 +122,10 @@ tools:
     depth: 1
   - command: cargo
 ```
+
+When a structured batch file sets `depth: 1`, full JSON output exposes nested
+profiles under `subcommand_profiles`. Compact output keeps the summary smaller
+and reports only counts like `nested_profile_count`.
 
 Recent inspection hardening:
 

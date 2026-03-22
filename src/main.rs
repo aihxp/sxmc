@@ -1413,6 +1413,52 @@ fn format_batch_toon(value: &Value, compact: bool) -> String {
     lines.join("\n")
 }
 
+fn format_diff_toon(value: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "command: {}",
+        value["command"].as_str().unwrap_or("<unknown>")
+    ));
+    lines.push(format!(
+        "summary_changed: {}",
+        value["summary_changed"].as_bool().unwrap_or(false)
+    ));
+    if let Some(before) = value["before_summary"].as_str() {
+        lines.push(format!("before_summary: {}", before));
+    }
+    if let Some(after) = value["after_summary"].as_str() {
+        lines.push(format!("after_summary: {}", after));
+    }
+
+    let add_list = |lines: &mut Vec<String>, label: &str, field: &Value| {
+        if let Some(items) = field.as_array() {
+            if !items.is_empty() {
+                lines.push(String::new());
+                lines.push(format!("{}:", label));
+                for item in items {
+                    lines.push(format!("- {}", item.as_str().unwrap_or("<unknown>")));
+                }
+            }
+        }
+    };
+
+    add_list(&mut lines, "subcommands_added", &value["subcommands_added"]);
+    add_list(
+        &mut lines,
+        "subcommands_removed",
+        &value["subcommands_removed"],
+    );
+    add_list(&mut lines, "options_added", &value["options_added"]);
+    add_list(&mut lines, "options_removed", &value["options_removed"]);
+    add_list(&mut lines, "environment_added", &value["environment_added"]);
+    add_list(
+        &mut lines,
+        "environment_removed",
+        &value["environment_removed"],
+    );
+    lines.join("\n")
+}
+
 fn print_cache_stats_report(value: &Value) {
     println!("CLI profile cache");
     println!("Path: {}", value["path"].as_str().unwrap_or("<unknown>"));
@@ -1629,15 +1675,23 @@ fn print_write_outcomes(outcomes: &[cli_surfaces::WriteOutcome]) {
         match outcome.mode {
             ArtifactMode::Preview => {}
             ArtifactMode::WriteSidecar => {
-                println!(
-                    "Wrote sidecar for {}: {}",
-                    outcome.label,
-                    outcome.path.display()
-                );
+                let verb = match outcome.status {
+                    cli_surfaces::WriteStatus::Created => "Created sidecar for",
+                    cli_surfaces::WriteStatus::Updated => "Updated sidecar for",
+                    cli_surfaces::WriteStatus::Skipped => "Skipped unchanged sidecar for",
+                    cli_surfaces::WriteStatus::Removed => "Removed sidecar for",
+                };
+                println!("{} {}: {}", verb, outcome.label, outcome.path.display());
             }
             ArtifactMode::Patch => {}
             ArtifactMode::Apply => {
-                println!("Updated {}: {}", outcome.label, outcome.path.display());
+                let verb = match outcome.status {
+                    cli_surfaces::WriteStatus::Created => "Created",
+                    cli_surfaces::WriteStatus::Updated => "Updated",
+                    cli_surfaces::WriteStatus::Skipped => "Skipped unchanged",
+                    cli_surfaces::WriteStatus::Removed => "Removed",
+                };
+                println!("{} {}: {}", verb, outcome.label, outcome.path.display());
             }
         }
     }
@@ -2498,9 +2552,17 @@ async fn main() -> Result<()> {
                     cli_surfaces::inspect_cli_with_depth(&command, allow_self, depth)?;
                 let value = cli_surfaces::diff_profile_value(&before_profile, &after_profile);
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    if matches!(format, output::StructuredOutputFormat::Toon) {
+                        println!("{}", format_diff_toon(&value));
+                        return Ok(());
+                    }
                     println!("{}", output::format_structured_value(&value, format));
                 } else {
                     let format = output::resolve_structured_format(format, pretty);
+                    if matches!(format, output::StructuredOutputFormat::Toon) {
+                        println!("{}", format_diff_toon(&value));
+                        return Ok(());
+                    }
                     println!("{}", output::format_structured_value(&value, format));
                 }
             }

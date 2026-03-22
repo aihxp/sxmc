@@ -172,6 +172,7 @@ sxmc inspect batch git cargo brew --parallel 4 --compact --format json-pretty
 sxmc inspect batch --from-file tools.txt --parallel 4 --compact --format json-pretty
 sxmc inspect batch --from-file tools.yaml --parallel 4 --since 2026-03-22T00:00:00Z
 sxmc inspect diff git --before before.json --format json-pretty
+sxmc inspect diff git --before before.json --format toon
 sxmc inspect cache-stats --format json-pretty
 sxmc inspect cache-invalidate cargo --format json-pretty
 sxmc inspect cache-invalidate 'g*' --dry-run --format json-pretty
@@ -207,10 +208,16 @@ Notes:
   trimmed, and inline arguments like `git status` are preserved.
 - `.yaml` / `.yml` / `.toml` batch files can use structured tool entries with
   per-command depth overrides.
+- depth overrides are fully reflected in full JSON output via
+  `subcommand_profiles`; compact output keeps only summary fields like
+  `nested_profile_count`.
 - `sxmc inspect batch ... --since <timestamp>` skips commands whose executable
   has not changed since the given Unix-seconds or RFC3339 timestamp.
 - `sxmc inspect diff <tool> --before before.json` compares a live CLI against a
   previously saved profile and reports added/removed options and subcommands.
+- `sxmc inspect diff` expects a full saved profile, not a compact one. If you
+  want to diff later, save with `sxmc inspect cli <tool> --format json-pretty`
+  and omit `--compact`.
 - `sxmc inspect cache-stats` shows cache path, entry count, size, and default
   TTL so repeated inspection behavior is visible.
 - `sxmc inspect cache-invalidate <tool>` removes cached profiles for one command

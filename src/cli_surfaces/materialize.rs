@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 
 use crate::cli_surfaces::model::{
     host_profile_spec, AiClientProfile, ApplyStrategy, ArtifactAudience, ArtifactMode,
-    CliSurfaceProfile, ConfigShape, GeneratedArtifact, WriteOutcome, AI_HOST_SPECS,
+    CliSurfaceProfile, ConfigShape, GeneratedArtifact, WriteOutcome, WriteStatus, AI_HOST_SPECS,
 };
 use crate::cli_surfaces::render::{
     render_agent_doc, render_client_config, render_llms_txt, render_mcp_wrapper_readme,
@@ -246,15 +246,17 @@ pub fn materialize_artifacts(
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
                     mode,
+                    status: WriteStatus::Skipped,
                 });
             }
             ArtifactMode::WriteSidecar => {
                 let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
-                write_file(&path, &artifact.content)?;
+                let status = write_with_status(&path, &artifact.content)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path,
                     mode,
+                    status,
                 });
             }
             ArtifactMode::Patch => {
@@ -263,14 +265,16 @@ pub fn materialize_artifacts(
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
                     mode,
+                    status: WriteStatus::Skipped,
                 });
             }
             ArtifactMode::Apply => {
-                let path = apply_artifact(artifact, root)?;
+                let (path, status) = apply_artifact(artifact, root)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path,
                     mode,
+                    status,
                 });
             }
         }
@@ -335,6 +339,7 @@ pub fn remove_artifacts(
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
                     mode,
+                    status: WriteStatus::Skipped,
                 });
             }
             ArtifactMode::WriteSidecar => {
@@ -344,6 +349,7 @@ pub fn remove_artifacts(
                     label: artifact.label.clone(),
                     path,
                     mode,
+                    status: WriteStatus::Removed,
                 });
             }
             ArtifactMode::Patch => {
@@ -352,6 +358,7 @@ pub fn remove_artifacts(
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
                     mode,
+                    status: WriteStatus::Skipped,
                 });
             }
             ArtifactMode::Apply => {
@@ -360,6 +367,7 @@ pub fn remove_artifacts(
                     label: artifact.label.clone(),
                     path,
                     mode,
+                    status: WriteStatus::Removed,
                 });
             }
         }
@@ -544,12 +552,12 @@ fn render_patch_body(existing: &str, proposed: &str) -> String {
     body
 }
 
-fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> {
+fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<(PathBuf, WriteStatus)> {
     match artifact.apply_strategy {
         ApplyStrategy::SidecarOnly => {
             let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
-            write_file(&path, &artifact.content)?;
-            Ok(path)
+            let status = write_with_status(&path, &artifact.content)?;
+            Ok((path, status))
         }
         ApplyStrategy::ManagedMarkdownBlock => {
             let existing = if artifact.target_path.exists() {
@@ -562,8 +570,8 @@ fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> 
                 &artifact.content,
                 markdown_block_markers(artifact),
             );
-            write_file(&artifact.target_path, &updated)?;
-            Ok(artifact.target_path.clone())
+            let status = write_with_status(&artifact.target_path, &updated)?;
+            Ok((artifact.target_path.clone(), status))
         }
         ApplyStrategy::JsonMcpConfig => {
             let existing = if artifact.target_path.exists() {
@@ -572,8 +580,8 @@ fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> 
                 String::new()
             };
             let updated = merge_json_mcp_config(&existing, &artifact.content)?;
-            write_file(&artifact.target_path, &updated)?;
-            Ok(artifact.target_path.clone())
+            let status = write_with_status(&artifact.target_path, &updated)?;
+            Ok((artifact.target_path.clone(), status))
         }
         ApplyStrategy::TomlManagedBlock => {
             let existing = if artifact.target_path.exists() {
@@ -583,12 +591,12 @@ fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> 
             };
             let updated =
                 upsert_managed_block(&existing, &artifact.content, toml_block_markers(artifact));
-            write_file(&artifact.target_path, &updated)?;
-            Ok(artifact.target_path.clone())
+            let status = write_with_status(&artifact.target_path, &updated)?;
+            Ok((artifact.target_path.clone(), status))
         }
         ApplyStrategy::DirectWrite => {
-            write_file(&artifact.target_path, &artifact.content)?;
-            Ok(artifact.target_path.clone())
+            let status = write_with_status(&artifact.target_path, &artifact.content)?;
+            Ok((artifact.target_path.clone(), status))
         }
     }
 }
@@ -640,6 +648,22 @@ fn write_file(path: &Path, content: &str) -> Result<()> {
     }
     fs::write(path, content)?;
     Ok(())
+}
+
+fn write_with_status(path: &Path, content: &str) -> Result<WriteStatus> {
+    let existed = path.exists();
+    if existed {
+        let existing = fs::read_to_string(path).unwrap_or_default();
+        if existing == content {
+            return Ok(WriteStatus::Skipped);
+        }
+    }
+    write_file(path, content)?;
+    Ok(if existed {
+        WriteStatus::Updated
+    } else {
+        WriteStatus::Created
+    })
 }
 
 fn write_or_remove_target(path: &Path, content: &str) -> Result<()> {
