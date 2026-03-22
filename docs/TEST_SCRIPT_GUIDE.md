@@ -115,7 +115,7 @@ Tests that create bakes or modify cache use `sxmc_isolated()` which overrides `H
 - Iterates over a large array of tool names
 - Skips tools not on PATH
 - Runs `sxmc inspect cli <tool>` and validates output is valid JSON
-- Checks summary quality: rejects raw `usage:` lines, copyright notices, overstrike artifacts (`SSUUMM`), error messages, and bug report URLs
+- Checks summary quality: rejects raw `usage:` lines, copyright notices, overstrike artifacts (`SSUUMM`), error messages, and *standalone* “report bugs” noise — but **allows** GNU-style `Report bugs to <url>` lines (e.g. `nm`, `strings`) so Linux binutils do not false-positive
 - Reports aggregate counts (parsed, failed, skipped, bad summaries)
 
 ### Section 4: Previously-Broken Tools (lines 259–319)

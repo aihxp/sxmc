@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+
+- `scripts/test-sxmc.sh`: CLI inspection “bad summary” heuristic no longer
+  false-positives on GNU binutils (`nm`, `strings`, etc.) whose `man`/`--help`
+  text includes `Report bugs to <url>`.
+
 ## [0.2.21] - 2026-03-22
 
 ### Changed

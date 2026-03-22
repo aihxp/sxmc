@@ -233,7 +233,10 @@ for cmd in "${CLI_TOOLS[@]}"; do
   sl=$(printf '%s\n' "$summary" | tr '[:upper:]' '[:lower:]')
   if [ -z "$summary" ]; then
     ((BAD_SUMMARIES++))
-  elif printf '%s\n' "$sl" | grep -qE '^usage:|copyright|report bugs|SSUUMM|illegal option|unrecognized'; then
+  elif printf '%s\n' "$sl" | grep -qE '^usage:|copyright|SSUUMM|illegal option|unrecognized'; then
+    ((BAD_SUMMARIES++))
+  # GNU binutils (nm, strings, etc.) often include "Report bugs to <url>" — legitimate, not junk.
+  elif printf '%s\n' "$sl" | grep -qE 'report bugs' && ! printf '%s\n' "$sl" | grep -qE 'report bugs to'; then
     ((BAD_SUMMARIES++))
   fi
 done
