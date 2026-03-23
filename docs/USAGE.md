@@ -228,9 +228,10 @@ sxmc inspect export-corpus --root . --output corpus.ndjson --format ndjson
 sxmc inspect corpus-stats corpus.json --format json-pretty
 sxmc inspect corpus-query corpus.json --search content --limit 10 --format json-pretty
 sxmc inspect bundle-export --bundle-name "Platform Bundle" --role platform --hosts claude-code,cursor --output team-profiles.bundle.json
-sxmc inspect bundle-verify team-profiles.bundle.json --format json-pretty
-sxmc publish team-profiles.bundle.json --bundle-name "Platform Bundle" --role platform
-sxmc pull team-profiles.bundle.json --output-dir .sxmc/ai/profiles --expected-sha256 <digest>
+sxmc inspect bundle-export --bundle-name "Platform Bundle" --role platform --signature-secret env:SXMC_BUNDLE_SECRET --output team-profiles.bundle.json
+sxmc inspect bundle-verify team-profiles.bundle.json --signature-secret env:SXMC_BUNDLE_SECRET --format json-pretty
+sxmc publish team-profiles.bundle.json --bundle-name "Platform Bundle" --role platform --signature-secret env:SXMC_BUNDLE_SECRET
+sxmc pull team-profiles.bundle.json --output-dir .sxmc/ai/profiles --expected-sha256 <digest> --signature-secret env:SXMC_BUNDLE_SECRET
 sxmc inspect cache-stats --format json-pretty
 sxmc inspect cache-invalidate cargo --format json-pretty
 sxmc inspect cache-invalidate 'g*' --dry-run --format json-pretty
@@ -315,13 +316,19 @@ Notes:
   restores bundle contents into a target profile directory, with
   `--overwrite` or `--skip-existing` controls when files already exist.
 - `sxmc inspect bundle-verify <bundle>` validates a bundle schema and reports
-  its canonical SHA-256 digest, with optional `--expected-sha256` enforcement.
+  its canonical SHA-256 digest, with optional `--expected-sha256` enforcement
+  and optional embedded-signature verification via `--signature-secret`.
+- `sxmc inspect bundle-export --signature-secret env:SXMC_BUNDLE_SECRET ...`
+  embeds an HMAC-SHA256 signature into the bundle so downstream pulls can verify
+  authenticity without relying on transport trust alone.
 - `sxmc publish <target>` wraps bundle export plus transport, so you can write
   a team bundle directly to a file path, `file://` URI, or HTTP(S) endpoint,
-  and its report includes the canonical bundle SHA-256.
+  and its report includes the canonical bundle SHA-256 plus any embedded
+  signature metadata.
 - `sxmc pull <source>` fetches a published bundle from a file path, `file://`
   URI, or HTTP(S) endpoint and restores it into a local profile directory, with
-  optional `--expected-sha256` verification before import.
+  optional `--expected-sha256` and `--signature-secret` verification before
+  import.
 - `sxmc inspect diff --format markdown` renders a PR-friendly Markdown summary
   of summary, subcommand, option, and environment deltas.
 - `sxmc inspect diff --watch 3` re-runs the diff every three seconds, and each

@@ -1244,6 +1244,17 @@ else
   fail "publish/pull" "${pull_out:0:220}"
 fi
 
+signed_bundle_file="$TMPDIR_TEST/signed.bundle.json"
+signed_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --signature-secret "team-secret" --output "$signed_bundle_file" 2>/dev/null)
+signed_verify=$("$SXMC" inspect bundle-verify "$signed_bundle_file" --signature-secret "team-secret" 2>/dev/null)
+signed_pull_dir="$TMPDIR_TEST/signed-pulled-profiles"
+signed_pull=$("$SXMC" pull "$signed_bundle_file" --root "$bundle_root" --output-dir "$signed_pull_dir" --signature-secret "team-secret" 2>/dev/null)
+if json_check "$signed_export" "d.get('signature',{}).get('present') is True and d.get('signature',{}).get('algorithm') == 'hmac-sha256'" && json_check "$signed_verify" "d.get('signature',{}).get('verified') is True" && json_check "$signed_pull" "d.get('imported_count',0) >= 1 and d.get('signature',{}).get('verified') is True" && [ -f "$signed_pull_dir/git.json" ]; then
+  pass "signed bundles export, verify, and pull with embedded signatures"
+else
+  fail "signed bundle flow" "${signed_pull:0:220}"
+fi
+
 watch_ndjson=$(
 python3 - <<'PY' "$SXMC" "$before_profile"
 import subprocess, sys, time

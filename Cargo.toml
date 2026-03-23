@@ -1,6 +1,6 @@
 [package]
 name = "sxmc"
-version = "0.2.30"
+version = "0.2.31"
 edition = "2021"
 description = "One Rust binary to bridge skills, MCP, and APIs into reusable agent, terminal, and automation workflows"
 license = "MIT"
@@ -55,6 +55,7 @@ tower-http = { version = "0.6", features = ["limit"] }
 url = "2"
 shlex = "1"
 sha2 = "0.10"
+hmac = "0.12"
 
 [dev-dependencies]
 assert_cmd = "2"

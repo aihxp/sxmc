@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.31] - 2026-03-23
+
+### Added
+
+- embedded HMAC-SHA256 bundle signing and verification across
+  `inspect bundle-export`, `inspect bundle-verify`, `publish`, and `pull`
+
 ## [0.2.30] - 2026-03-23
 
 ### Added

@@ -475,6 +475,10 @@ pub enum Commands {
         #[arg(long = "timeout-seconds", value_name = "SECONDS")]
         timeout_seconds: Option<u64>,
 
+        /// Secret used to embed an HMAC signature into the exported bundle
+        #[arg(long = "signature-secret", value_name = "SECRET")]
+        signature_secret: Option<String>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -516,6 +520,10 @@ pub enum Commands {
         /// Require the pulled bundle to match this SHA-256 digest
         #[arg(long = "expected-sha256", value_name = "HEX")]
         expected_sha256: Option<String>,
+
+        /// Secret used to verify an embedded HMAC signature on the pulled bundle
+        #[arg(long = "signature-secret", value_name = "SECRET")]
+        signature_secret: Option<String>,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -834,6 +842,8 @@ pub enum InspectAction {
         hosts: Vec<AiClientProfile>,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long = "signature-secret", value_name = "SECRET")]
+        signature_secret: Option<String>,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]
@@ -862,6 +872,8 @@ pub enum InspectAction {
         timeout_seconds: Option<u64>,
         #[arg(long = "expected-sha256", value_name = "HEX")]
         expected_sha256: Option<String>,
+        #[arg(long = "signature-secret", value_name = "SECRET")]
+        signature_secret: Option<String>,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]

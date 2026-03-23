@@ -978,6 +978,78 @@ fn test_publish_and_pull_round_trip_via_local_bundle_path() {
         ));
 }
 
+#[test]
+fn test_signed_bundle_export_verify_and_pull_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let secret = "team-secret";
+    let bundle_path = root.join("signed.bundle.json");
+    let export = command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--signature-secret",
+        secret,
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(export["signature"]["present"], Value::Bool(true));
+    assert_eq!(export["signature"]["algorithm"], Value::from("hmac-sha256"));
+
+    let verify = command_json(&[
+        "inspect",
+        "bundle-verify",
+        bundle_path.to_str().unwrap(),
+        "--signature-secret",
+        secret,
+        "--pretty",
+    ]);
+    assert_eq!(verify["signature"]["present"], Value::Bool(true));
+    assert_eq!(verify["signature"]["verified"], Value::Bool(true));
+
+    let pull_dir = root.join("signed-pulled");
+    let pull = command_json(&[
+        "pull",
+        bundle_path.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--output-dir",
+        pull_dir.to_str().unwrap(),
+        "--signature-secret",
+        secret,
+        "--pretty",
+    ]);
+    assert_eq!(pull["imported_count"], Value::from(1));
+    assert_eq!(pull["signature"]["verified"], Value::Bool(true));
+    assert!(pull_dir.join("git.json").exists());
+
+    sxmc()
+        .args([
+            "inspect",
+            "bundle-verify",
+            bundle_path.to_str().unwrap(),
+            "--signature-secret",
+            "wrong-secret",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "did not match the expected embedded signature",
+        ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_publish_and_pull_support_http_bundle_endpoints() {
     let temp = tempfile::tempdir().unwrap();

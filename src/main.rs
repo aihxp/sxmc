@@ -4,6 +4,7 @@ mod command_handlers;
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
+use hmac::{Hmac, Mac};
 use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -35,6 +36,7 @@ use sxmc::skills::{discovery, generator, parser};
 const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 const PROFILE_CORPUS_SCHEMA: &str = "sxmc_profile_corpus_v1";
 const PROFILE_STALE_DAYS: i64 = 30;
+const PROFILE_BUNDLE_SIGNATURE_ALGORITHM: &str = "hmac-sha256";
 
 fn resolve_paths(paths: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
     paths.unwrap_or_else(discovery::default_paths)
@@ -1181,14 +1183,17 @@ fn file_uri_to_path(uri: &str) -> PathBuf {
     PathBuf::from(uri.trim_start_matches("file://"))
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         use std::fmt::Write as _;
         let _ = write!(&mut out, "{:02x}", byte);
     }
     out
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    bytes_to_hex(&Sha256::digest(bytes))
 }
 
 fn resolved_hosts(only_hosts: &[AiClientProfile]) -> Vec<AiClientProfile> {
@@ -1276,6 +1281,110 @@ fn validate_bundle_value(value: Value, source_label: &str) -> Result<Value> {
 
 fn bundle_sha256_from_value(value: &Value) -> Result<String> {
     Ok(sha256_hex(&serde_json::to_vec(value)?))
+}
+
+fn unsigned_bundle_value(value: &Value) -> Value {
+    let mut unsigned = value.clone();
+    if let Some(object) = unsigned.as_object_mut() {
+        object.remove("signature");
+    }
+    unsigned
+}
+
+fn bundle_signature_from_value(value: &Value, secret: &str) -> Result<String> {
+    let payload = serde_json::to_vec(&unsigned_bundle_value(value))?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).map_err(|error| {
+        sxmc::error::SxmcError::Other(format!(
+            "Failed to initialize bundle signature generator: {}",
+            error
+        ))
+    })?;
+    mac.update(&payload);
+    let bytes = mac.finalize().into_bytes();
+    Ok(bytes_to_hex(bytes.as_slice()))
+}
+
+fn sign_bundle_value(mut value: Value, signature_secret: Option<&str>) -> Result<Value> {
+    if let Some(secret) = signature_secret {
+        let signature = bundle_signature_from_value(&value, secret)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "signature".into(),
+                json!({
+                    "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM,
+                    "value": signature,
+                }),
+            );
+        }
+    }
+    Ok(value)
+}
+
+fn bundle_signature_report(value: &Value) -> Value {
+    match value.get("signature") {
+        Some(Value::Object(signature)) => json!({
+            "present": true,
+            "algorithm": signature.get("algorithm").and_then(Value::as_str),
+            "value": signature.get("value").and_then(Value::as_str),
+        }),
+        _ => json!({
+            "present": false,
+            "algorithm": Value::Null,
+            "value": Value::Null,
+        }),
+    }
+}
+
+fn verify_bundle_signature(
+    value: &Value,
+    signature_secret: Option<&str>,
+    source_label: &str,
+) -> Result<Value> {
+    let base = bundle_signature_report(value);
+    let Some(secret) = signature_secret else {
+        return Ok(base);
+    };
+    let signature = value
+        .get("signature")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            sxmc::error::SxmcError::Other(format!(
+                "Bundle source '{}' is missing embedded signature metadata. Re-export it with --signature-secret before verifying.",
+                source_label
+            ))
+        })?;
+    let algorithm = signature
+        .get("algorithm")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if algorithm != PROFILE_BUNDLE_SIGNATURE_ALGORITHM {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Bundle source '{}' uses unsupported signature algorithm '{}'. Expected '{}'.",
+            source_label, algorithm, PROFILE_BUNDLE_SIGNATURE_ALGORITHM
+        )));
+    }
+    let expected = signature
+        .get("value")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            sxmc::error::SxmcError::Other(format!(
+                "Bundle source '{}' is missing an embedded signature value.",
+                source_label
+            ))
+        })?;
+    let actual = bundle_signature_from_value(value, secret)?;
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Bundle source '{}' did not match the expected embedded signature.\nExpected: {}\nActual:   {}",
+            source_label, expected, actual
+        )));
+    }
+    let mut verified = base;
+    if let Some(object) = verified.as_object_mut() {
+        object.insert("verified".into(), Value::Bool(true));
+    }
+    Ok(verified)
 }
 
 fn verify_bundle_digest(
@@ -4466,10 +4575,12 @@ async fn main() -> Result<()> {
                 role,
                 hosts,
                 output,
+                signature_secret,
                 pretty,
                 format,
             } => {
                 let root = resolve_generation_root(root)?;
+                let signature_secret = parse_optional_secret(signature_secret)?;
                 let use_default_recursive = inputs.is_empty();
                 let profile_inputs = if use_default_recursive {
                     vec![default_saved_profiles_dir(&root)]
@@ -4487,12 +4598,15 @@ async fn main() -> Result<()> {
                 };
                 let profile_paths =
                     collect_profile_paths(&profile_inputs, recursive || use_default_recursive)?;
-                let value = export_profile_bundle_value(
-                    &profile_paths,
-                    bundle_name.as_deref(),
-                    description.as_deref(),
-                    role.as_deref(),
-                    &hosts,
+                let value = sign_bundle_value(
+                    export_profile_bundle_value(
+                        &profile_paths,
+                        bundle_name.as_deref(),
+                        description.as_deref(),
+                        role.as_deref(),
+                        &hosts,
+                    )?,
+                    signature_secret.as_deref(),
                 )?;
                 let output_path = if output.is_absolute() {
                     output
@@ -4509,6 +4623,7 @@ async fn main() -> Result<()> {
                     "output": output_path.display().to_string(),
                     "profile_count": value["profile_count"],
                     "sha256": sha256,
+                    "signature": bundle_signature_report(&value),
                     "metadata": value["metadata"],
                     "entries": value["entries"],
                 });
@@ -4562,18 +4677,23 @@ async fn main() -> Result<()> {
                 auth_headers,
                 timeout_seconds,
                 expected_sha256,
+                signature_secret,
                 pretty,
                 format,
             } => {
                 let headers = parse_headers(&auth_headers)?;
+                let signature_secret = parse_optional_secret(signature_secret)?;
                 let bundle_value =
                     read_bundle_source(&input, &headers, parse_timeout(timeout_seconds)).await?;
                 let sha256 =
                     verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &input)?;
+                let signature =
+                    verify_bundle_signature(&bundle_value, signature_secret.as_deref(), &input)?;
                 let report = json!({
                     "bundle_schema": PROFILE_BUNDLE_SCHEMA,
                     "input": input,
                     "sha256": sha256,
+                    "signature": signature,
                     "verified": true,
                     "expected_sha256": expected_sha256,
                     "profile_count": bundle_value["profile_count"],
@@ -4788,10 +4908,12 @@ async fn main() -> Result<()> {
             hosts,
             auth_headers,
             timeout_seconds,
+            signature_secret,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
+            let signature_secret = parse_optional_secret(signature_secret)?;
             let use_default_recursive = inputs.is_empty();
             let profile_inputs = if use_default_recursive {
                 vec![default_saved_profiles_dir(&root)]
@@ -4809,12 +4931,15 @@ async fn main() -> Result<()> {
             };
             let profile_paths =
                 collect_profile_paths(&profile_inputs, recursive || use_default_recursive)?;
-            let bundle_value = export_profile_bundle_value(
-                &profile_paths,
-                bundle_name.as_deref(),
-                description.as_deref(),
-                role.as_deref(),
-                &hosts,
+            let bundle_value = sign_bundle_value(
+                export_profile_bundle_value(
+                    &profile_paths,
+                    bundle_name.as_deref(),
+                    description.as_deref(),
+                    role.as_deref(),
+                    &hosts,
+                )?,
+                signature_secret.as_deref(),
             )?;
             let resolved_target = if is_http_target(&target) || target.starts_with("file://") {
                 target.clone()
@@ -4837,6 +4962,7 @@ async fn main() -> Result<()> {
                 "http_status": destination.get("http_status").cloned().unwrap_or(Value::Null),
                 "profile_count": bundle_value["profile_count"],
                 "sha256": sha256,
+                "signature": bundle_signature_report(&bundle_value),
                 "metadata": bundle_value["metadata"],
                 "entries": bundle_value["entries"],
             });
@@ -4860,10 +4986,12 @@ async fn main() -> Result<()> {
             auth_headers,
             timeout_seconds,
             expected_sha256,
+            signature_secret,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
+            let signature_secret = parse_optional_secret(signature_secret)?;
             let output_dir = output_dir.unwrap_or_else(|| default_saved_profiles_dir(&root));
             let output_dir = if output_dir.is_absolute() {
                 output_dir
@@ -4888,6 +5016,11 @@ async fn main() -> Result<()> {
                     .await?;
             let sha256 =
                 verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &resolved_source)?;
+            let signature = verify_bundle_signature(
+                &bundle_value,
+                signature_secret.as_deref(),
+                &resolved_source,
+            )?;
             let value = import_profile_bundle_from_value(
                 &resolved_source,
                 bundle_value,
@@ -4897,6 +5030,7 @@ async fn main() -> Result<()> {
             let mut report = value;
             if let Some(object) = report.as_object_mut() {
                 object.insert("sha256".into(), Value::from(sha256));
+                object.insert("signature".into(), signature);
                 object.insert(
                     "expected_sha256".into(),
                     expected_sha256.map(Value::from).unwrap_or(Value::Null),
