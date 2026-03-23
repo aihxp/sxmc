@@ -8,8 +8,8 @@ use crate::cli_surfaces::model::{
     CliSurfaceProfile, ConfigShape, GeneratedArtifact, WriteOutcome, WriteStatus, AI_HOST_SPECS,
 };
 use crate::cli_surfaces::render::{
-    render_agent_doc, render_client_config, render_llms_txt, render_mcp_wrapper_readme,
-    render_portable_agent_doc, render_skill_markdown, slugify,
+    render_agent_doc, render_ci_workflow, render_client_config, render_llms_txt,
+    render_mcp_wrapper_readme, render_portable_agent_doc, render_skill_markdown, slugify,
 };
 use crate::error::{Result, SxmcError};
 
@@ -163,6 +163,27 @@ pub fn generate_skill_artifacts(
         audience: ArtifactAudience::Shared,
         sidecar_scope: "skills".into(),
     }]
+}
+
+pub fn generate_ci_workflow_artifact(
+    profile: &CliSurfaceProfile,
+    root: &Path,
+    output_dir: &Path,
+) -> GeneratedArtifact {
+    let slug = slugify(&profile.command);
+    let workflow_dir = if output_dir.is_absolute() {
+        output_dir.to_path_buf()
+    } else {
+        root.join(output_dir)
+    };
+    GeneratedArtifact {
+        label: "CI drift workflow".into(),
+        target_path: workflow_dir.join(format!("sxmc-drift-{slug}.yml")),
+        content: render_ci_workflow(profile),
+        apply_strategy: ApplyStrategy::DirectWrite,
+        audience: ArtifactAudience::Shared,
+        sidecar_scope: "ci".into(),
+    }
 }
 
 pub fn generate_mcp_wrapper_artifacts(

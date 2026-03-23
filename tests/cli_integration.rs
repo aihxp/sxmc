@@ -3020,6 +3020,31 @@ fn test_scaffold_client_config_apply_merges_opencode_json() {
 }
 
 #[test]
+fn test_scaffold_ci_apply_writes_github_actions_workflow() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "ci",
+            "--from-profile",
+            "examples/profiles/from_cli.json",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let workflow_path = temp.path().join(".github/workflows/sxmc-drift-gh.yml");
+    let contents = fs::read_to_string(&workflow_path).unwrap();
+    assert!(contents.contains("name: sxmc drift (gh)"));
+    assert!(contents.contains("sxmc inspect diff gh"));
+    assert!(contents.contains("--exit-code"));
+}
+
+#[test]
 fn test_scaffold_skill_apply_writes_skill_markdown() {
     let temp = tempfile::tempdir().unwrap();
 

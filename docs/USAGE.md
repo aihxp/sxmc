@@ -224,6 +224,7 @@ sxmc inspect batch --retry-failed previous-batch.ndjson --parallel 4
 sxmc inspect diff git --before before.json --format json-pretty
 sxmc inspect diff git --before before.json --format toon
 sxmc inspect diff --before before.json --after after.json --format markdown
+sxmc scaffold ci --from-profile .sxmc/ai/profiles/git.json --mode apply
 sxmc inspect export-corpus --root . --output corpus.ndjson --format ndjson
 sxmc inspect corpus-stats corpus.json --format json-pretty
 sxmc inspect corpus-query corpus.json --search content --limit 10 --format json-pretty
@@ -298,6 +299,9 @@ Notes:
   profiles without needing the live tool on `PATH`.
 - `sxmc inspect drift .sxmc/ai/profiles --recursive` checks saved profile files
   against the currently installed commands and reports which ones changed.
+- `sxmc scaffold ci --from-profile <profile> --mode apply` generates a
+  GitHub Actions drift workflow that turns `inspect diff --exit-code` into a
+  ready-to-commit CI gate.
 - `sxmc inspect migrate-profile legacy-profile.json --output migrated.json`
   rewrites a saved profile through the current schema-tolerant loader and emits
   canonical current-schema JSON.

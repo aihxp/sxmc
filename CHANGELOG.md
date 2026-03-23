@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.32] - 2026-03-23
+
+### Added
+
+- `sxmc scaffold ci --from-profile ...` for generating GitHub Actions drift
+  workflows from saved CLI profiles
+
 ## [0.2.31] - 2026-03-23
 
 ### Added

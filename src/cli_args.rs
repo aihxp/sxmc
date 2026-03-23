@@ -984,6 +984,16 @@ pub enum InitAction {
 
 #[derive(Subcommand)]
 pub enum ScaffoldAction {
+    Ci {
+        #[arg(long = "from-profile")]
+        from_profile: PathBuf,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long, default_value = ".github/workflows")]
+        output_dir: PathBuf,
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: ArtifactMode,
+    },
     Skill {
         #[arg(long = "from-profile")]
         from_profile: PathBuf,

@@ -211,6 +211,49 @@ pub(crate) fn render_llms_txt(profile: &CliSurfaceProfile) -> String {
     lines.join("\n")
 }
 
+pub(crate) fn render_ci_workflow(profile: &CliSurfaceProfile) -> String {
+    let slug = slugify(&profile.command);
+    let profile_path = format!(".sxmc/ai/profiles/{slug}.json");
+    format!(
+        r#"name: sxmc drift ({command})
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cli-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sxmc
+        run: cargo install --locked sxmc
+
+      - name: Summarize CLI drift
+        run: |
+          sxmc inspect diff {command} \
+            --before {profile_path} \
+            --format markdown | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on unexpected CLI drift
+        run: |
+          sxmc inspect diff {command} \
+            --before {profile_path} \
+            --exit-code \
+            --format json-pretty >/dev/null
+
+      - name: Snapshot status
+        run: sxmc status --format json-pretty
+"#,
+        command = profile.command,
+        profile_path = profile_path,
+    )
+}
+
 pub(crate) fn render_client_config(
     client: AiClientProfile,
     server_name: &str,

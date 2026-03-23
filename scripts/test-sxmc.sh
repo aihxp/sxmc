@@ -432,6 +432,15 @@ if has_cmd git; then
     fail "scaffold skill should mention subcommands"
   fi
 
+  # CI drift workflow scaffold
+  ci_out=$("$SXMC" scaffold ci --from-profile "$TMPDIR_TEST/git-profile.json" --root "$TMPDIR_TEST/ci-root" --mode apply 2>&1)
+  ci_file="$TMPDIR_TEST/ci-root/.github/workflows/sxmc-drift-git.yml"
+  if [ -f "$ci_file" ] && grep -q "sxmc inspect diff git" "$ci_file" && grep -q -- "--exit-code" "$ci_file"; then
+    pass "scaffold ci produces drift workflow"
+  else
+    fail "scaffold ci" "${ci_out:0:120}"
+  fi
+
   # MCP wrapper scaffold
   mcp_out=$("$SXMC" scaffold mcp-wrapper --from-profile "$TMPDIR_TEST/git-profile.json" --output-dir "$TMPDIR_TEST/scaffolds" 2>&1)
   if echo "$mcp_out" | grep -q "README.md"; then

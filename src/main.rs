@@ -5097,6 +5097,19 @@ async fn main() -> Result<()> {
         },
 
         Commands::Scaffold { action } => match action {
+            ScaffoldAction::Ci {
+                from_profile,
+                root,
+                output_dir,
+                mode,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let profile = cli_surfaces::load_profile(&from_profile)?;
+                let artifact =
+                    cli_surfaces::generate_ci_workflow_artifact(&profile, &root, &output_dir);
+                let outcomes = cli_surfaces::materialize_artifacts(&[artifact], mode, &root)?;
+                print_write_outcomes(&outcomes);
+            }
             ScaffoldAction::Skill {
                 from_profile,
                 root,

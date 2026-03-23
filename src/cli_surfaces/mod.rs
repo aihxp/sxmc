@@ -10,7 +10,7 @@ pub use inspect::{
     parse_command_spec, profile_value, warm_profile_cache, BatchInspectRequest, BatchSinceFilter,
 };
 pub use materialize::{
-    generate_agent_doc_artifact, generate_client_config_artifact,
+    generate_agent_doc_artifact, generate_ci_workflow_artifact, generate_client_config_artifact,
     generate_full_coverage_init_artifacts, generate_host_native_agent_doc_artifacts,
     generate_llms_txt_artifact, generate_mcp_wrapper_artifacts,
     generate_portable_agent_doc_artifact, generate_profile_artifact, generate_skill_artifacts,
