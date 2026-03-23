@@ -473,6 +473,40 @@ fn test_status_reports_host_capabilities_and_baked_health() {
 }
 
 #[test]
+fn test_status_can_compare_hosts() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join(".cursor")).unwrap();
+    fs::write(temp.path().join("CLAUDE.md"), "# Claude\n").unwrap();
+    fs::write(
+        temp.path().join(".cursor").join("mcp.json"),
+        "{\"mcpServers\":{}}\n",
+    )
+    .unwrap();
+
+    let value = command_json(&[
+        "status",
+        "--root",
+        temp.path().to_str().unwrap(),
+        "--compare-hosts",
+        "claude-code,cursor",
+        "--pretty",
+    ]);
+    assert_eq!(
+        value["host_capability_diff"]["difference_count"],
+        Value::from(2)
+    );
+    let differences = value["host_capability_diff"]["differences"]
+        .as_array()
+        .unwrap();
+    assert!(differences
+        .iter()
+        .any(|entry| entry["field"] == "doc_present"));
+    assert!(differences
+        .iter()
+        .any(|entry| entry["field"] == "config_present"));
+}
+
+#[test]
 fn test_inspect_cache_stats_reports_entries() {
     let value = command_json(&["inspect", "cache-stats"]);
     assert!(value["path"].as_str().unwrap_or_default().contains("sxmc"));
@@ -563,6 +597,61 @@ fn test_inspect_bundle_export_and_import_round_trip() {
     assert_eq!(import["imported_count"], Value::from(2));
     assert!(import_dir.join("git.json").exists());
     assert!(import_dir.join("ls.json").exists());
+}
+
+#[test]
+fn test_inspect_bundle_export_and_import_preserve_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let bundle_path = root.join("team.bundle.json");
+    let export = command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--bundle-name",
+        "Platform Bundle",
+        "--description",
+        "Blessed internal tool set",
+        "--role",
+        "platform",
+        "--hosts",
+        "claude-code,cursor",
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(export["metadata"]["name"], Value::from("Platform Bundle"));
+    assert_eq!(export["metadata"]["role"], Value::from("platform"));
+    assert_eq!(
+        export["metadata"]["hosts"],
+        Value::from(vec!["claude-code", "cursor"])
+    );
+
+    let import_dir = root.join("imported-with-metadata");
+    let import = command_json(&[
+        "inspect",
+        "bundle-import",
+        bundle_path.to_str().unwrap(),
+        "--output-dir",
+        import_dir.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(
+        import["metadata"]["description"],
+        Value::from("Blessed internal tool set")
+    );
+    assert_eq!(import["imported_count"], Value::from(1));
 }
 
 #[test]

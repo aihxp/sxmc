@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc status --compare-hosts <hosts>` for explicit host-to-host capability
+  comparison across selected AI environments
+- team-friendly bundle metadata on `sxmc inspect bundle-export`, preserved by
+  `sxmc inspect bundle-import`
+
 ## [0.2.25] - 2026-03-23
 
 ### Added

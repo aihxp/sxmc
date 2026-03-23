@@ -829,6 +829,17 @@ else
   fail "status --health should report baked health" "${status_health_out:0:220}"
 fi
 
+status_compare_root="$TMPDIR_TEST/status-compare-root"
+mkdir -p "$status_compare_root/.cursor"
+printf '# Claude\n' > "$status_compare_root/CLAUDE.md"
+printf '{"mcpServers":{}}\n' > "$status_compare_root/.cursor/mcp.json"
+status_compare_out=$("$SXMC" status --root "$status_compare_root" --compare-hosts claude-code,cursor 2>/dev/null)
+if json_check "$status_compare_out" "d.get('host_capability_diff',{}).get('difference_count',0) >= 1"; then
+  pass "status --compare-hosts reports host capability differences"
+else
+  fail "status --compare-hosts should report differences" "${status_compare_out:0:220}"
+fi
+
 # ============================================================================
 # SECTION 14: Self-Dogfooding
 # ============================================================================
@@ -1170,6 +1181,16 @@ if json_check "$bundle_export" "d.get('profile_count',0) == 2" && json_check "$b
   pass "inspect bundle export/import round-trips saved profiles"
 else
   fail "inspect bundle export/import" "${bundle_import:0:200}"
+fi
+
+bundle_meta_file="$TMPDIR_TEST/team.bundle.json"
+bundle_meta_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --bundle-name "Platform Bundle" --description "Blessed internal tool set" --role platform --hosts claude-code,cursor --output "$bundle_meta_file" 2>/dev/null)
+bundle_meta_import_dir="$TMPDIR_TEST/bundle-meta-imported"
+bundle_meta_import=$("$SXMC" inspect bundle-import "$bundle_meta_file" --output-dir "$bundle_meta_import_dir" 2>/dev/null)
+if json_check "$bundle_meta_export" "d.get('metadata',{}).get('name') == 'Platform Bundle' and d.get('metadata',{}).get('role') == 'platform'" && json_check "$bundle_meta_import" "d.get('metadata',{}).get('description') == 'Blessed internal tool set'"; then
+  pass "inspect bundle export/import preserves bundle metadata"
+else
+  fail "inspect bundle metadata" "${bundle_meta_import:0:220}"
 fi
 
 watch_ndjson=$(

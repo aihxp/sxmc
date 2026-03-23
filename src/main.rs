@@ -1170,6 +1170,25 @@ fn bundle_slug(input: &str) -> String {
     }
 }
 
+fn resolved_hosts(only_hosts: &[AiClientProfile]) -> Vec<AiClientProfile> {
+    if only_hosts.is_empty() {
+        vec![
+            AiClientProfile::ClaudeCode,
+            AiClientProfile::Cursor,
+            AiClientProfile::GeminiCli,
+            AiClientProfile::GithubCopilot,
+            AiClientProfile::ContinueDev,
+            AiClientProfile::OpenCode,
+            AiClientProfile::JetbrainsAiAssistant,
+            AiClientProfile::Junie,
+            AiClientProfile::Windsurf,
+            AiClientProfile::OpenaiCodex,
+        ]
+    } else {
+        only_hosts.to_vec()
+    }
+}
+
 fn collect_profile_paths(paths: &[PathBuf], recursive: bool) -> Result<Vec<PathBuf>> {
     fn visit_dir(dir: &Path, recursive: bool, results: &mut Vec<PathBuf>) -> Result<()> {
         for entry in fs::read_dir(dir)? {
@@ -1204,7 +1223,7 @@ fn collect_profile_paths(paths: &[PathBuf], recursive: bool) -> Result<Vec<PathB
     Ok(results)
 }
 
-fn load_bundle_profiles(path: &Path) -> Result<Vec<cli_surfaces::CliSurfaceProfile>> {
+fn load_bundle_value(path: &Path) -> Result<Value> {
     let value: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
     let schema = value
         .get("bundle_schema")
@@ -1217,24 +1236,33 @@ fn load_bundle_profiles(path: &Path) -> Result<Vec<cli_surfaces::CliSurfaceProfi
             PROFILE_BUNDLE_SCHEMA
         )));
     }
-    let profiles = value
-        .get("profiles")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            sxmc::error::SxmcError::Other(format!(
-                "Bundle file '{}' is missing a `profiles` array.",
-                path.display()
-            ))
-        })?;
-    profiles
-        .iter()
-        .cloned()
-        .map(serde_json::from_value)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(Into::into)
+    Ok(value)
 }
 
-fn export_profile_bundle_value(profile_paths: &[PathBuf]) -> Result<Value> {
+fn bundle_metadata_value(
+    bundle_name: Option<&str>,
+    description: Option<&str>,
+    role: Option<&str>,
+    hosts: &[AiClientProfile],
+) -> Value {
+    json!({
+        "name": bundle_name,
+        "description": description,
+        "role": role,
+        "hosts": hosts
+            .iter()
+            .map(|host| cli_surfaces::host_profile_spec(*host).sidecar_scope)
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn export_profile_bundle_value(
+    profile_paths: &[PathBuf],
+    bundle_name: Option<&str>,
+    description: Option<&str>,
+    role: Option<&str>,
+    hosts: &[AiClientProfile],
+) -> Result<Value> {
     let mut profiles = Vec::new();
     let mut entries = Vec::new();
     for path in profile_paths {
@@ -1251,6 +1279,7 @@ fn export_profile_bundle_value(profile_paths: &[PathBuf]) -> Result<Value> {
         "generator_version": env!("CARGO_PKG_VERSION"),
         "generated_at": Utc::now().to_rfc3339(),
         "profile_count": profiles.len(),
+        "metadata": bundle_metadata_value(bundle_name, description, role, hosts),
         "entries": entries,
         "profiles": profiles,
     }))
@@ -1268,7 +1297,21 @@ fn import_profile_bundle_value(
     output_dir: &Path,
     mode: BundleImportMode,
 ) -> Result<Value> {
-    let profiles = load_bundle_profiles(input)?;
+    let bundle_value = load_bundle_value(input)?;
+    let profiles: Vec<cli_surfaces::CliSurfaceProfile> = bundle_value
+        .get("profiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            sxmc::error::SxmcError::Other(format!(
+                "Bundle file '{}' is missing a `profiles` array.",
+                input.display()
+            ))
+        })?
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(sxmc::error::SxmcError::from)?;
     fs::create_dir_all(output_dir)?;
     let mut written = Vec::new();
     let mut skipped = Vec::new();
@@ -1314,6 +1357,7 @@ fn import_profile_bundle_value(
         "bundle_schema": PROFILE_BUNDLE_SCHEMA,
         "input": input.display().to_string(),
         "output_dir": output_dir.display().to_string(),
+        "metadata": bundle_value.get("metadata").cloned().unwrap_or(Value::Null),
         "imported_count": written.len(),
         "skipped_count": skipped.len(),
         "written": written,
@@ -1405,24 +1449,11 @@ fn status_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
     Ok(value)
 }
 
-fn host_capability_value(root: &Path, only_hosts: &[AiClientProfile]) -> Value {
-    let hosts = if only_hosts.is_empty() {
-        vec![
-            AiClientProfile::ClaudeCode,
-            AiClientProfile::Cursor,
-            AiClientProfile::GeminiCli,
-            AiClientProfile::GithubCopilot,
-            AiClientProfile::ContinueDev,
-            AiClientProfile::OpenCode,
-            AiClientProfile::JetbrainsAiAssistant,
-            AiClientProfile::Junie,
-            AiClientProfile::Windsurf,
-            AiClientProfile::OpenaiCodex,
-        ]
-    } else {
-        only_hosts.to_vec()
-    };
-
+fn host_capability_map(
+    root: &Path,
+    only_hosts: &[AiClientProfile],
+) -> serde_json::Map<String, Value> {
+    let hosts = resolved_hosts(only_hosts);
     let mut summary = serde_json::Map::new();
     for host in hosts {
         let spec = cli_surfaces::host_profile_spec(host);
@@ -1444,7 +1475,50 @@ fn host_capability_value(root: &Path, only_hosts: &[AiClientProfile]) -> Value {
             }),
         );
     }
-    Value::Object(summary)
+    summary
+}
+
+fn host_capability_value(root: &Path, only_hosts: &[AiClientProfile]) -> Value {
+    Value::Object(host_capability_map(root, only_hosts))
+}
+
+fn compare_host_capabilities(root: &Path, compare_hosts: &[AiClientProfile]) -> Value {
+    let hosts = resolved_hosts(compare_hosts);
+    let capability_map = host_capability_map(root, &hosts);
+    let mut differences = Vec::new();
+    for field in ["ready", "doc_present", "config_present"] {
+        let mut truthy = Vec::new();
+        let mut falsy = Vec::new();
+        for host in &hosts {
+            let spec = cli_surfaces::host_profile_spec(*host);
+            let key = spec.sidecar_scope;
+            let value = capability_map
+                .get(key)
+                .and_then(|entry| entry.get(field))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if value {
+                truthy.push(key);
+            } else {
+                falsy.push(key);
+            }
+        }
+        if !truthy.is_empty() && !falsy.is_empty() {
+            differences.push(json!({
+                "field": field,
+                "hosts_true": truthy,
+                "hosts_false": falsy,
+            }));
+        }
+    }
+    json!({
+        "hosts": hosts
+            .iter()
+            .map(|host| cli_surfaces::host_profile_spec(*host).sidecar_scope)
+            .collect::<Vec<_>>(),
+        "difference_count": differences.len(),
+        "differences": differences,
+    })
 }
 
 async fn baked_health_value() -> Result<Value> {
@@ -1476,6 +1550,7 @@ async fn baked_health_value() -> Result<Value> {
 async fn status_value_with_health(
     root: &std::path::Path,
     only_hosts: &[AiClientProfile],
+    compare_hosts: &[AiClientProfile],
     include_health: bool,
 ) -> Result<Value> {
     let mut value = status_value(root, only_hosts)?;
@@ -1484,6 +1559,12 @@ async fn status_value_with_health(
             "host_capabilities".into(),
             host_capability_value(root, only_hosts),
         );
+        if compare_hosts.len() >= 2 {
+            object.insert(
+                "host_capability_diff".into(),
+                compare_host_capabilities(root, compare_hosts),
+            );
+        }
         if include_health {
             object.insert("baked_health".into(), baked_health_value().await?);
         }
@@ -1655,6 +1736,42 @@ fn print_status_report(value: &Value) {
                 "- {}: ready={} doc_present={} config_present={}",
                 label, ready, doc_present, config_present
             );
+        }
+    }
+    if let Some(diff) = value.get("host_capability_diff") {
+        println!();
+        println!(
+            "Host capability comparison: {} differing field(s)",
+            diff["difference_count"].as_u64().unwrap_or(0)
+        );
+        if let Some(entries) = diff["differences"].as_array() {
+            for entry in entries {
+                let field = entry["field"].as_str().unwrap_or("field");
+                let hosts_true = entry["hosts_true"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                let hosts_false = entry["hosts_false"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                println!(
+                    "- {}: true on [{}], false on [{}]",
+                    field, hosts_true, hosts_false
+                );
+            }
         }
     }
     if let Some(health) = value.get("baked_health") {
@@ -3660,6 +3777,10 @@ async fn main() -> Result<()> {
                 inputs,
                 root,
                 recursive,
+                bundle_name,
+                description,
+                role,
+                hosts,
                 output,
                 pretty,
                 format,
@@ -3682,7 +3803,13 @@ async fn main() -> Result<()> {
                 };
                 let profile_paths =
                     collect_profile_paths(&profile_inputs, recursive || use_default_recursive)?;
-                let value = export_profile_bundle_value(&profile_paths)?;
+                let value = export_profile_bundle_value(
+                    &profile_paths,
+                    bundle_name.as_deref(),
+                    description.as_deref(),
+                    role.as_deref(),
+                    &hosts,
+                )?;
                 let output_path = if output.is_absolute() {
                     output
                 } else {
@@ -3696,6 +3823,7 @@ async fn main() -> Result<()> {
                     "bundle_schema": PROFILE_BUNDLE_SCHEMA,
                     "output": output_path.display().to_string(),
                     "profile_count": value["profile_count"],
+                    "metadata": value["metadata"],
                     "entries": value["entries"],
                 });
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
@@ -4169,13 +4297,15 @@ async fn main() -> Result<()> {
         Commands::Status {
             root,
             only_hosts,
+            compare_hosts,
             health,
             human,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
-            let value = status_value_with_health(&root, &only_hosts, health).await?;
+            let value =
+                status_value_with_health(&root, &only_hosts, &compare_hosts, health).await?;
             if should_render_doctor_human(human, format, pretty, std::io::stdout().is_terminal()) {
                 print_status_report(&value);
             } else if let Some(format) = output::prefer_structured_output(format, pretty) {

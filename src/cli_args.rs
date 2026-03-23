@@ -500,6 +500,10 @@ pub enum Commands {
         #[arg(long = "only", value_enum, value_delimiter = ',')]
         only_hosts: Vec<AiClientProfile>,
 
+        /// Compare capability readiness across specific AI hosts
+        #[arg(long = "compare-hosts", value_enum, value_delimiter = ',')]
+        compare_hosts: Vec<AiClientProfile>,
+
         /// Check health of baked MCP/API connections
         #[arg(long)]
         health: bool,
@@ -670,6 +674,14 @@ pub enum InspectAction {
         root: Option<PathBuf>,
         #[arg(long)]
         recursive: bool,
+        #[arg(long = "bundle-name")]
+        bundle_name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long = "hosts", value_enum, value_delimiter = ',')]
+        hosts: Vec<AiClientProfile>,
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
