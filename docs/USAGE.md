@@ -218,8 +218,9 @@ sxmc inspect diff git --before before.json --format json-pretty
 sxmc inspect diff git --before before.json --format toon
 sxmc inspect diff --before before.json --after after.json --format markdown
 sxmc inspect bundle-export --bundle-name "Platform Bundle" --role platform --hosts claude-code,cursor --output team-profiles.bundle.json
+sxmc inspect bundle-verify team-profiles.bundle.json --format json-pretty
 sxmc publish team-profiles.bundle.json --bundle-name "Platform Bundle" --role platform
-sxmc pull team-profiles.bundle.json --output-dir .sxmc/ai/profiles
+sxmc pull team-profiles.bundle.json --output-dir .sxmc/ai/profiles --expected-sha256 <digest>
 sxmc inspect cache-stats --format json-pretty
 sxmc inspect cache-invalidate cargo --format json-pretty
 sxmc inspect cache-invalidate 'g*' --dry-run --format json-pretty
@@ -286,10 +287,14 @@ Notes:
 - `sxmc inspect bundle-import profiles.bundle.json --output-dir ./profiles`
   restores bundle contents into a target profile directory, with
   `--overwrite` or `--skip-existing` controls when files already exist.
+- `sxmc inspect bundle-verify <bundle>` validates a bundle schema and reports
+  its canonical SHA-256 digest, with optional `--expected-sha256` enforcement.
 - `sxmc publish <target>` wraps bundle export plus transport, so you can write
-  a team bundle directly to a file path, `file://` URI, or HTTP(S) endpoint.
+  a team bundle directly to a file path, `file://` URI, or HTTP(S) endpoint,
+  and its report includes the canonical bundle SHA-256.
 - `sxmc pull <source>` fetches a published bundle from a file path, `file://`
-  URI, or HTTP(S) endpoint and restores it into a local profile directory.
+  URI, or HTTP(S) endpoint and restores it into a local profile directory, with
+  optional `--expected-sha256` verification before import.
 - `sxmc inspect diff --format markdown` renders a PR-friendly Markdown summary
   of summary, subcommand, option, and environment deltas.
 - `sxmc inspect diff --watch 3` re-runs the diff every three seconds, and each

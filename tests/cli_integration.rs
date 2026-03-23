@@ -682,7 +682,19 @@ fn test_publish_and_pull_round_trip_via_local_bundle_path() {
     ]);
     assert_eq!(publish["profile_count"], Value::from(1));
     assert_eq!(publish["transport"], Value::from("file"));
+    assert!(publish["sha256"].as_str().unwrap_or_default().len() == 64);
     assert!(bundle_path.exists());
+
+    let verify = command_json(&[
+        "inspect",
+        "bundle-verify",
+        bundle_path.to_str().unwrap(),
+        "--expected-sha256",
+        publish["sha256"].as_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(verify["verified"], Value::Bool(true));
+    assert_eq!(verify["sha256"], publish["sha256"]);
 
     let pull_dir = root.join("pulled-profiles");
     let pull = command_json(&[
@@ -692,11 +704,31 @@ fn test_publish_and_pull_round_trip_via_local_bundle_path() {
         root.to_str().unwrap(),
         "--output-dir",
         pull_dir.to_str().unwrap(),
+        "--expected-sha256",
+        publish["sha256"].as_str().unwrap(),
         "--pretty",
     ]);
     assert_eq!(pull["imported_count"], Value::from(1));
     assert_eq!(pull["metadata"]["name"], Value::from("Team Bundle"));
+    assert_eq!(pull["sha256"], publish["sha256"]);
     assert!(pull_dir.join("git.json").exists());
+
+    sxmc()
+        .args([
+            "pull",
+            bundle_path.to_str().unwrap(),
+            "--root",
+            root.to_str().unwrap(),
+            "--output-dir",
+            root.join("wrong-sha-pull").to_str().unwrap(),
+            "--expected-sha256",
+            "deadbeef",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "did not match the expected SHA-256",
+        ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -755,6 +787,7 @@ async fn test_publish_and_pull_support_http_bundle_endpoints() {
     ]);
     assert_eq!(publish["transport"], Value::from("http"));
     assert_eq!(publish["profile_count"], Value::from(1));
+    assert!(publish["sha256"].as_str().unwrap_or_default().len() == 64);
     assert_eq!(
         stored_bundle.lock().unwrap().as_ref().unwrap()["metadata"]["name"],
         Value::from("Remote Bundle")
@@ -768,9 +801,12 @@ async fn test_publish_and_pull_support_http_bundle_endpoints() {
         root.to_str().unwrap(),
         "--output-dir",
         pull_dir.to_str().unwrap(),
+        "--expected-sha256",
+        publish["sha256"].as_str().unwrap(),
         "--pretty",
     ]);
     assert_eq!(pull["imported_count"], Value::from(1));
+    assert_eq!(pull["sha256"], publish["sha256"]);
     assert!(pull_dir.join("git.json").exists());
 
     handle.abort();

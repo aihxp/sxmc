@@ -489,6 +489,10 @@ pub enum Commands {
         #[arg(long = "timeout-seconds", value_name = "SECONDS")]
         timeout_seconds: Option<u64>,
 
+        /// Require the pulled bundle to match this SHA-256 digest
+        #[arg(long = "expected-sha256", value_name = "HEX")]
+        expected_sha256: Option<String>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -786,6 +790,19 @@ pub enum InspectAction {
         overwrite: bool,
         #[arg(long, conflicts_with = "overwrite")]
         skip_existing: bool,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    BundleVerify {
+        input: String,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+        #[arg(long = "expected-sha256", value_name = "HEX")]
+        expected_sha256: Option<String>,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]

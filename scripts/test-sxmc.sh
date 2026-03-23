@@ -1195,9 +1195,11 @@ fi
 
 publish_bundle_file="$TMPDIR_TEST/published.bundle.json"
 publish_out=$("$SXMC" publish "$publish_bundle_file" --root "$bundle_root" --bundle-name "Team Bundle" --role platform 2>/dev/null)
+publish_sha=$(json_field "$publish_out" "d.get('sha256','')")
+bundle_verify=$("$SXMC" inspect bundle-verify "$publish_bundle_file" --expected-sha256 "$publish_sha" 2>/dev/null)
 pull_dir="$TMPDIR_TEST/pulled-profiles"
-pull_out=$("$SXMC" pull "$publish_bundle_file" --root "$bundle_root" --output-dir "$pull_dir" 2>/dev/null)
-if json_check "$publish_out" "d.get('transport') == 'file' and d.get('metadata',{}).get('name') == 'Team Bundle'" && json_check "$pull_out" "d.get('imported_count',0) >= 1 and d.get('metadata',{}).get('name') == 'Team Bundle'" && [ -f "$pull_dir/git.json" ]; then
+pull_out=$("$SXMC" pull "$publish_bundle_file" --root "$bundle_root" --output-dir "$pull_dir" --expected-sha256 "$publish_sha" 2>/dev/null)
+if json_check "$publish_out" "d.get('transport') == 'file' and len(d.get('sha256','')) == 64 and d.get('metadata',{}).get('name') == 'Team Bundle'" && json_check "$bundle_verify" "d.get('verified') is True and d.get('sha256') == '$publish_sha'" && json_check "$pull_out" "d.get('imported_count',0) >= 1 and d.get('sha256') == '$publish_sha' and d.get('metadata',{}).get('name') == 'Team Bundle'" && [ -f "$pull_dir/git.json" ]; then
   pass "publish/pull round-trips bundle files"
 else
   fail "publish/pull" "${pull_out:0:220}"

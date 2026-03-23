@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-03-23
+
+### Added
+
+- `sxmc inspect bundle-verify` plus optional SHA-256 enforcement on `pull`
+  for safer team bundle distribution
+
 ## [0.2.27] - 2026-03-23
 
 ### Added

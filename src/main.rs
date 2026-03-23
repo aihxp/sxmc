@@ -6,6 +6,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::BufRead;
 use std::io::IsTerminal;
@@ -1178,6 +1179,16 @@ fn file_uri_to_path(uri: &str) -> PathBuf {
     PathBuf::from(uri.trim_start_matches("file://"))
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{:02x}", byte);
+    }
+    out
+}
+
 fn resolved_hosts(only_hosts: &[AiClientProfile]) -> Vec<AiClientProfile> {
     if only_hosts.is_empty() {
         vec![
@@ -1259,6 +1270,27 @@ fn validate_bundle_value(value: Value, source_label: &str) -> Result<Value> {
         )));
     }
     Ok(value)
+}
+
+fn bundle_sha256_from_value(value: &Value) -> Result<String> {
+    Ok(sha256_hex(&serde_json::to_vec(value)?))
+}
+
+fn verify_bundle_digest(
+    value: &Value,
+    expected_sha256: Option<&str>,
+    source_label: &str,
+) -> Result<String> {
+    let actual = bundle_sha256_from_value(value)?;
+    if let Some(expected) = expected_sha256 {
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(sxmc::error::SxmcError::Other(format!(
+                "Bundle source '{}' did not match the expected SHA-256.\nExpected: {}\nActual:   {}",
+                source_label, expected, actual
+            )));
+        }
+    }
+    Ok(actual)
 }
 
 fn bundle_metadata_value(
@@ -3977,10 +4009,12 @@ async fn main() -> Result<()> {
                     fs::create_dir_all(parent)?;
                 }
                 fs::write(&output_path, serde_json::to_string_pretty(&value)?)?;
+                let sha256 = bundle_sha256_from_value(&value)?;
                 let report = json!({
                     "bundle_schema": PROFILE_BUNDLE_SCHEMA,
                     "output": output_path.display().to_string(),
                     "profile_count": value["profile_count"],
+                    "sha256": sha256,
                     "metadata": value["metadata"],
                     "entries": value["entries"],
                 });
@@ -4026,6 +4060,38 @@ async fn main() -> Result<()> {
                         value["imported_count"].as_u64().unwrap_or(0),
                         value["output_dir"].as_str().unwrap_or("<unknown>"),
                         value["skipped_count"].as_u64().unwrap_or(0)
+                    );
+                }
+            }
+            InspectAction::BundleVerify {
+                input,
+                auth_headers,
+                timeout_seconds,
+                expected_sha256,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let bundle_value =
+                    read_bundle_source(&input, &headers, parse_timeout(timeout_seconds)).await?;
+                let sha256 =
+                    verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &input)?;
+                let report = json!({
+                    "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+                    "input": input,
+                    "sha256": sha256,
+                    "verified": true,
+                    "expected_sha256": expected_sha256,
+                    "profile_count": bundle_value["profile_count"],
+                    "metadata": bundle_value.get("metadata").cloned().unwrap_or(Value::Null),
+                });
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&report, format));
+                } else {
+                    println!(
+                        "Verified bundle {} ({} profiles)",
+                        report["input"].as_str().unwrap_or("<unknown>"),
+                        report["profile_count"].as_u64().unwrap_or(0)
                     );
                 }
             }
@@ -4172,12 +4238,14 @@ async fn main() -> Result<()> {
                 parse_timeout(timeout_seconds),
             )
             .await?;
+            let sha256 = bundle_sha256_from_value(&bundle_value)?;
             let report = json!({
                 "bundle_schema": PROFILE_BUNDLE_SCHEMA,
                 "target": destination["target"],
                 "transport": destination["transport"],
                 "http_status": destination.get("http_status").cloned().unwrap_or(Value::Null),
                 "profile_count": bundle_value["profile_count"],
+                "sha256": sha256,
                 "metadata": bundle_value["metadata"],
                 "entries": bundle_value["entries"],
             });
@@ -4200,6 +4268,7 @@ async fn main() -> Result<()> {
             skip_existing,
             auth_headers,
             timeout_seconds,
+            expected_sha256,
             pretty,
             format,
         } => {
@@ -4226,20 +4295,30 @@ async fn main() -> Result<()> {
             let bundle_value =
                 read_bundle_source(&resolved_source, &headers, parse_timeout(timeout_seconds))
                     .await?;
+            let sha256 =
+                verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &resolved_source)?;
             let value = import_profile_bundle_from_value(
                 &resolved_source,
                 bundle_value,
                 &output_dir,
                 mode,
             )?;
+            let mut report = value;
+            if let Some(object) = report.as_object_mut() {
+                object.insert("sha256".into(), Value::from(sha256));
+                object.insert(
+                    "expected_sha256".into(),
+                    expected_sha256.map(Value::from).unwrap_or(Value::Null),
+                );
+            }
             if let Some(format) = output::prefer_structured_output(format, pretty) {
-                println!("{}", output::format_structured_value(&value, format));
+                println!("{}", output::format_structured_value(&report, format));
             } else {
                 println!(
                     "Pulled {} profiles from {} into {}",
-                    value["imported_count"].as_u64().unwrap_or(0),
-                    value["input"].as_str().unwrap_or("<unknown>"),
-                    value["output_dir"].as_str().unwrap_or("<unknown>")
+                    report["imported_count"].as_u64().unwrap_or(0),
+                    report["input"].as_str().unwrap_or("<unknown>"),
+                    report["output_dir"].as_str().unwrap_or("<unknown>")
                 );
             }
         }
