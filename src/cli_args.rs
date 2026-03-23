@@ -500,6 +500,10 @@ pub enum Commands {
         #[arg(long = "only", value_enum, value_delimiter = ',')]
         only_hosts: Vec<AiClientProfile>,
 
+        /// Check health of baked MCP/API connections
+        #[arg(long)]
+        health: bool,
+
         /// Force the human-readable report even when stdout is not a TTY
         #[arg(long)]
         human: bool,
@@ -659,6 +663,34 @@ pub enum InspectAction {
         format: Option<output::StructuredOutputFormat>,
         #[arg(long)]
         allow_self: bool,
+    },
+    BundleExport {
+        inputs: Vec<PathBuf>,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        recursive: bool,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    BundleImport {
+        input: PathBuf,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long, conflicts_with = "skip_existing")]
+        overwrite: bool,
+        #[arg(long, conflicts_with = "overwrite")]
+        skip_existing: bool,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
     },
     CacheStats {
         #[arg(long)]

@@ -812,6 +812,23 @@ else
   fail "status should report saved-profile drift" "${status_out:0:180}"
 fi
 
+STATUS_BAKE_HOME="$TMPDIR_TEST/status-bake-home"
+mkdir -p "$STATUS_BAKE_HOME/.config" "$STATUS_BAKE_HOME/AppData/Roaming" "$STATUS_BAKE_HOME/AppData/Local"
+status_bake_source=$(python3 - <<'PY' "$SXMC"
+import json, sys
+print(json.dumps([sys.argv[1], "serve", "--paths", "tests/fixtures"]))
+PY
+)
+env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
+  "$SXMC" bake create status-health --type stdio --source "$status_bake_source" >/dev/null 2>&1
+status_health_out=$(env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
+  "$SXMC" status --health 2>/dev/null)
+if json_check "$status_health_out" "d.get('baked_health',{}).get('healthy_count',0) >= 1 and 'host_capabilities' in d"; then
+  pass "status --health reports baked connection health and host capabilities"
+else
+  fail "status --health should report baked health" "${status_health_out:0:220}"
+fi
+
 # ============================================================================
 # SECTION 14: Self-Dogfooding
 # ============================================================================
@@ -1139,6 +1156,20 @@ if json_check "$retry_failed" "d.get('count', 0) == 1 and d.get('failed_count', 
   pass "inspect batch --retry-failed reloads failed commands from saved batch output"
 else
   fail "inspect batch --retry-failed" "${retry_failed:0:160}"
+fi
+
+bundle_root="$TMPDIR_TEST/bundle-root"
+mkdir -p "$bundle_root/.sxmc/ai/profiles"
+"$SXMC" inspect cli git --pretty > "$bundle_root/.sxmc/ai/profiles/git.json"
+"$SXMC" inspect cli ls --pretty > "$bundle_root/.sxmc/ai/profiles/ls.json"
+bundle_file="$TMPDIR_TEST/profiles.bundle.json"
+bundle_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --output "$bundle_file" 2>/dev/null)
+bundle_import_dir="$TMPDIR_TEST/bundle-imported"
+bundle_import=$("$SXMC" inspect bundle-import "$bundle_file" --output-dir "$bundle_import_dir" 2>/dev/null)
+if json_check "$bundle_export" "d.get('profile_count',0) == 2" && json_check "$bundle_import" "d.get('imported_count',0) == 2" && [ -f "$bundle_import_dir/git.json" ] && [ -f "$bundle_import_dir/ls.json" ]; then
+  pass "inspect bundle export/import round-trips saved profiles"
+else
+  fail "inspect bundle export/import" "${bundle_import:0:200}"
 fi
 
 watch_ndjson=$(

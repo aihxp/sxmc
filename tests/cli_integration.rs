@@ -435,6 +435,44 @@ fn test_status_reports_saved_profile_drift() {
 }
 
 #[test]
+fn test_status_reports_host_capabilities_and_baked_health() {
+    let temp = tempfile::tempdir().unwrap();
+    let inner = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--paths".to_string(),
+        "tests/fixtures".to_string(),
+    ])
+    .unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-health",
+            "--type",
+            "stdio",
+            "--source",
+            &inner,
+        ])
+        .assert()
+        .success();
+
+    let output = sxmc_with_config_home(temp.path())
+        .args(["status", "--health", "--pretty"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(value["host_capabilities"]["claude-code"]["label"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Claude"));
+    assert_eq!(value["baked_health"]["count"], Value::from(1));
+    assert_eq!(value["baked_health"]["healthy_count"], Value::from(1));
+}
+
+#[test]
 fn test_inspect_cache_stats_reports_entries() {
     let value = command_json(&["inspect", "cache-stats"]);
     assert!(value["path"].as_str().unwrap_or_default().contains("sxmc"));
@@ -478,6 +516,53 @@ fn test_inspect_drift_detects_changed_saved_profile() {
     assert_eq!(value["count"], Value::from(1));
     assert_eq!(value["changed_count"], Value::from(1));
     assert_eq!(value["entries"][0]["command"], Value::from("cargo"));
+}
+
+#[test]
+fn test_inspect_bundle_export_and_import_round_trip() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    let ls = command_json(&["inspect", "cli", "ls", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        profiles_dir.join("ls.json"),
+        serde_json::to_string_pretty(&ls).unwrap(),
+    )
+    .unwrap();
+
+    let bundle_path = root.join("profiles.bundle.json");
+    let export = command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(export["profile_count"], Value::from(2));
+    assert!(bundle_path.exists());
+
+    let import_dir = root.join("imported-profiles");
+    let import = command_json(&[
+        "inspect",
+        "bundle-import",
+        bundle_path.to_str().unwrap(),
+        "--output-dir",
+        import_dir.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(import["imported_count"], Value::from(2));
+    assert!(import_dir.join("git.json").exists());
+    assert!(import_dir.join("ls.json").exists());
 }
 
 #[test]

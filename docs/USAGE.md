@@ -176,6 +176,7 @@ sxmc doctor --check --only claude-code,cursor
 sxmc doctor --check --fix --only claude-code,cursor --from-cli gh
 sxmc doctor --remove --only claude-code --from-cli gh
 sxmc status --human
+sxmc status --health --format json-pretty
 sxmc inspect cli <tool> --depth 1 --format json-pretty
 sxmc inspect cli <tool> --depth 2 --compact --format json-pretty
 sxmc inspect batch git cargo brew --parallel 4 --compact --format json-pretty
@@ -186,6 +187,8 @@ sxmc inspect drift .sxmc/ai/profiles --recursive --format json-pretty
 sxmc inspect diff git --before before.json --format json-pretty
 sxmc inspect diff --before before.json --after after.json --format markdown
 sxmc inspect migrate-profile legacy-profile.json --output migrated-profile.json
+sxmc inspect bundle-export --output team-profiles.bundle.json
+sxmc inspect bundle-import team-profiles.bundle.json --output-dir .sxmc/ai/profiles
 sxmc inspect cache-stats --format json-pretty
 sxmc inspect cache-invalidate cargo --format json-pretty
 sxmc inspect cache-invalidate 'g*' --dry-run --format json-pretty
@@ -242,6 +245,8 @@ Notes:
   startup files or managed snippets for the selected hosts.
 - `sxmc status` extends doctor with saved-profile drift so you can see whether
   `.sxmc/ai/profiles` still matches the currently installed tools.
+- `sxmc status --health` also validates baked MCP/API connections and adds a
+  `baked_health` summary plus per-host readiness under `host_capabilities`.
 - `sxmc inspect batch ...` keeps partial failures in a `failures` array instead
   of failing the whole run on the first missing command.
 - `sxmc inspect batch ... --parallel N` bounds concurrency for larger batch jobs.
@@ -268,6 +273,11 @@ Notes:
 - `sxmc inspect migrate-profile legacy-profile.json --output migrated.json`
   rewrites a saved profile through the current schema-tolerant loader and emits
   canonical current-schema JSON.
+- `sxmc inspect bundle-export --output profiles.bundle.json` packages saved
+  profiles from `.sxmc/ai/profiles` into one portable bundle file.
+- `sxmc inspect bundle-import profiles.bundle.json --output-dir ./profiles`
+  restores bundle contents into a target profile directory, with
+  `--overwrite` or `--skip-existing` controls when files already exist.
 - `sxmc inspect diff --format markdown` renders a PR-friendly Markdown summary
   of summary, subcommand, option, and environment deltas.
 - `sxmc inspect diff --watch 3` re-runs the diff every three seconds, and each

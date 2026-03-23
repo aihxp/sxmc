@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.25] - 2026-03-23
+
+### Added
+
+- `sxmc inspect bundle-export` / `sxmc inspect bundle-import` for portable
+  local profile bundle distribution and recovery
+
+### Changed
+
+- `sxmc status --health` now reports baked-connection health and per-host
+  readiness summaries in addition to saved-profile drift
+- wrapped CLI tool execution now includes machine-friendly stdout detection in
+  the returned execution envelope
+
 ## [0.2.24] - 2026-03-22
 
 ### Added

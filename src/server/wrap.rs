@@ -160,6 +160,9 @@ impl ServerHandler for WrappedCliServer {
 
         match executor::execute_command(&self.executable, &args, None, self.timeout_secs).await {
             Ok(result) => {
+                let stdout_json = serde_json::from_str::<Value>(&result.stdout).ok();
+                let machine_friendly_stdout = stdout_json.is_some();
+                let stderr_nonempty = !result.stderr.trim().is_empty();
                 let payload = json!({
                     "wrapped_command": self.wrapped_command,
                     "tool": tool.name,
@@ -168,7 +171,10 @@ impl ServerHandler for WrappedCliServer {
                         .chain(args.clone())
                         .collect::<Vec<_>>(),
                     "stdout": result.stdout,
+                    "stdout_json": stdout_json,
+                    "machine_friendly_stdout": machine_friendly_stdout,
                     "stderr": result.stderr,
+                    "stderr_nonempty": stderr_nonempty,
                     "exit_code": result.exit_code,
                 });
                 let text = serde_json::to_string_pretty(&payload)

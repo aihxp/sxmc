@@ -1,6 +1,7 @@
 mod cli_args;
 mod command_handlers;
 
+use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
@@ -29,6 +30,8 @@ use sxmc::output;
 use sxmc::security;
 use sxmc::server::{self, HttpServeLimits};
 use sxmc::skills::{discovery, generator, parser};
+
+const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 
 fn resolve_paths(paths: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
     paths.unwrap_or_else(discovery::default_paths)
@@ -1147,6 +1150,26 @@ fn default_saved_profiles_dir(root: &std::path::Path) -> PathBuf {
     root.join(".sxmc").join("ai").join("profiles")
 }
 
+fn bundle_slug(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_sep = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_sep = false;
+        } else if !last_sep {
+            out.push('-');
+            last_sep = true;
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        "profile".into()
+    } else {
+        out
+    }
+}
+
 fn collect_profile_paths(paths: &[PathBuf], recursive: bool) -> Result<Vec<PathBuf>> {
     fn visit_dir(dir: &Path, recursive: bool, results: &mut Vec<PathBuf>) -> Result<()> {
         for entry in fs::read_dir(dir)? {
@@ -1179,6 +1202,123 @@ fn collect_profile_paths(paths: &[PathBuf], recursive: bool) -> Result<Vec<PathB
     results.sort();
     results.dedup();
     Ok(results)
+}
+
+fn load_bundle_profiles(path: &Path) -> Result<Vec<cli_surfaces::CliSurfaceProfile>> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    let schema = value
+        .get("bundle_schema")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if schema != PROFILE_BUNDLE_SCHEMA {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Bundle file '{}' is not a valid sxmc profile bundle. Expected `bundle_schema: {}`.",
+            path.display(),
+            PROFILE_BUNDLE_SCHEMA
+        )));
+    }
+    let profiles = value
+        .get("profiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            sxmc::error::SxmcError::Other(format!(
+                "Bundle file '{}' is missing a `profiles` array.",
+                path.display()
+            ))
+        })?;
+    profiles
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+fn export_profile_bundle_value(profile_paths: &[PathBuf]) -> Result<Value> {
+    let mut profiles = Vec::new();
+    let mut entries = Vec::new();
+    for path in profile_paths {
+        let profile = cli_surfaces::load_profile(path)?;
+        entries.push(json!({
+            "command": profile.command,
+            "path": path.display().to_string(),
+        }));
+        profiles.push(serde_json::to_value(profile)?);
+    }
+    Ok(json!({
+        "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+        "generated_by": "sxmc",
+        "generator_version": env!("CARGO_PKG_VERSION"),
+        "generated_at": Utc::now().to_rfc3339(),
+        "profile_count": profiles.len(),
+        "entries": entries,
+        "profiles": profiles,
+    }))
+}
+
+#[derive(Copy, Clone)]
+enum BundleImportMode {
+    Unique,
+    Overwrite,
+    SkipExisting,
+}
+
+fn import_profile_bundle_value(
+    input: &Path,
+    output_dir: &Path,
+    mode: BundleImportMode,
+) -> Result<Value> {
+    let profiles = load_bundle_profiles(input)?;
+    fs::create_dir_all(output_dir)?;
+    let mut written = Vec::new();
+    let mut skipped = Vec::new();
+    let mut slug_counts: HashMap<String, usize> = HashMap::new();
+
+    for profile in profiles {
+        let base_slug = bundle_slug(&profile.command);
+        let target = match mode {
+            BundleImportMode::Overwrite => output_dir.join(format!("{base_slug}.json")),
+            BundleImportMode::SkipExisting => {
+                let path = output_dir.join(format!("{base_slug}.json"));
+                if path.exists() {
+                    skipped.push(json!({
+                        "command": profile.command,
+                        "path": path.display().to_string(),
+                        "reason": "existing file preserved",
+                    }));
+                    continue;
+                }
+                path
+            }
+            BundleImportMode::Unique => {
+                let count = slug_counts.entry(base_slug.clone()).or_insert(0);
+                let mut path = output_dir.join(format!("{base_slug}.json"));
+                while path.exists() {
+                    *count += 1;
+                    path = output_dir.join(format!("{base_slug}-{}.json", *count + 1));
+                }
+                path
+            }
+        };
+        fs::write(
+            &target,
+            serde_json::to_string_pretty(&cli_surfaces::profile_value(&profile))?,
+        )?;
+        written.push(json!({
+            "command": profile.command,
+            "path": target.display().to_string(),
+        }));
+    }
+
+    Ok(json!({
+        "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+        "input": input.display().to_string(),
+        "output_dir": output_dir.display().to_string(),
+        "imported_count": written.len(),
+        "skipped_count": skipped.len(),
+        "written": written,
+        "skipped": skipped,
+    }))
 }
 
 fn drift_entry_for_profile(path: &Path, allow_self: bool) -> Value {
@@ -1261,6 +1401,92 @@ fn status_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
                 "drift": drift,
             }),
         );
+    }
+    Ok(value)
+}
+
+fn host_capability_value(root: &Path, only_hosts: &[AiClientProfile]) -> Value {
+    let hosts = if only_hosts.is_empty() {
+        vec![
+            AiClientProfile::ClaudeCode,
+            AiClientProfile::Cursor,
+            AiClientProfile::GeminiCli,
+            AiClientProfile::GithubCopilot,
+            AiClientProfile::ContinueDev,
+            AiClientProfile::OpenCode,
+            AiClientProfile::JetbrainsAiAssistant,
+            AiClientProfile::Junie,
+            AiClientProfile::Windsurf,
+            AiClientProfile::OpenaiCodex,
+        ]
+    } else {
+        only_hosts.to_vec()
+    };
+
+    let mut summary = serde_json::Map::new();
+    for host in hosts {
+        let spec = cli_surfaces::host_profile_spec(host);
+        let doc_present = spec
+            .native_doc_target
+            .map(|path| root.join(path).exists())
+            .unwrap_or(false);
+        let config_present = spec
+            .native_config_target
+            .map(|path| root.join(path).exists())
+            .unwrap_or(false);
+        summary.insert(
+            spec.sidecar_scope.into(),
+            json!({
+                "label": spec.label,
+                "doc_present": doc_present,
+                "config_present": config_present,
+                "ready": doc_present || config_present,
+            }),
+        );
+    }
+    Value::Object(summary)
+}
+
+async fn baked_health_value() -> Result<Value> {
+    let store = BakeStore::load()?;
+    let mut entries = Vec::new();
+    let configs = store.list();
+    for config in configs {
+        let check = validate_bake_config(config).await;
+        entries.push(json!({
+            "name": config.name,
+            "source_type": format!("{:?}", config.source_type).to_lowercase(),
+            "source": config.source,
+            "healthy": check.is_ok(),
+            "error": check.err().map(|error| error.to_string()),
+        }));
+    }
+    let healthy_count = entries
+        .iter()
+        .filter(|entry| entry["healthy"].as_bool().unwrap_or(false))
+        .count();
+    Ok(json!({
+        "count": entries.len(),
+        "healthy_count": healthy_count,
+        "unhealthy_count": entries.len().saturating_sub(healthy_count),
+        "entries": entries,
+    }))
+}
+
+async fn status_value_with_health(
+    root: &std::path::Path,
+    only_hosts: &[AiClientProfile],
+    include_health: bool,
+) -> Result<Value> {
+    let mut value = status_value(root, only_hosts)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "host_capabilities".into(),
+            host_capability_value(root, only_hosts),
+        );
+        if include_health {
+            object.insert("baked_health".into(), baked_health_value().await?);
+        }
     }
     Ok(value)
 }
@@ -1411,6 +1637,45 @@ fn print_status_report(value: &Value) {
                     "- {} ({})",
                     entry["command"].as_str().unwrap_or("<unknown>"),
                     entry["path"].as_str().unwrap_or("<unknown>")
+                );
+            }
+        }
+    }
+    if let Some(hosts) = value["host_capabilities"].as_object() {
+        println!();
+        println!("Host capabilities");
+        let mut entries = hosts.iter().collect::<Vec<_>>();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        for (key, details) in entries {
+            let label = details["label"].as_str().unwrap_or(key);
+            let doc_present = details["doc_present"].as_bool().unwrap_or(false);
+            let config_present = details["config_present"].as_bool().unwrap_or(false);
+            let ready = details["ready"].as_bool().unwrap_or(false);
+            println!(
+                "- {}: ready={} doc_present={} config_present={}",
+                label, ready, doc_present, config_present
+            );
+        }
+    }
+    if let Some(health) = value.get("baked_health") {
+        println!();
+        println!(
+            "Baked connection health: {} healthy, {} unhealthy ({} total)",
+            health["healthy_count"].as_u64().unwrap_or(0),
+            health["unhealthy_count"].as_u64().unwrap_or(0),
+            health["count"].as_u64().unwrap_or(0)
+        );
+        if let Some(entries) = health["entries"].as_array() {
+            for entry in entries
+                .iter()
+                .filter(|entry| !entry["healthy"].as_bool().unwrap_or(false))
+                .take(5)
+            {
+                println!(
+                    "- {} [{}]: {}",
+                    entry["name"].as_str().unwrap_or("<unknown>"),
+                    entry["source_type"].as_str().unwrap_or("unknown"),
+                    entry["error"].as_str().unwrap_or("unhealthy")
                 );
             }
         }
@@ -3391,6 +3656,93 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             }
+            InspectAction::BundleExport {
+                inputs,
+                root,
+                recursive,
+                output,
+                pretty,
+                format,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let use_default_recursive = inputs.is_empty();
+                let profile_inputs = if use_default_recursive {
+                    vec![default_saved_profiles_dir(&root)]
+                } else {
+                    inputs
+                        .into_iter()
+                        .map(|path| {
+                            if path.is_absolute() {
+                                path
+                            } else {
+                                root.join(path)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let profile_paths =
+                    collect_profile_paths(&profile_inputs, recursive || use_default_recursive)?;
+                let value = export_profile_bundle_value(&profile_paths)?;
+                let output_path = if output.is_absolute() {
+                    output
+                } else {
+                    root.join(output)
+                };
+                if let Some(parent) = output_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&output_path, serde_json::to_string_pretty(&value)?)?;
+                let report = json!({
+                    "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+                    "output": output_path.display().to_string(),
+                    "profile_count": value["profile_count"],
+                    "entries": value["entries"],
+                });
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&report, format));
+                } else {
+                    println!(
+                        "Exported {} profiles to {}",
+                        report["profile_count"].as_u64().unwrap_or(0),
+                        report["output"].as_str().unwrap_or("<unknown>")
+                    );
+                }
+            }
+            InspectAction::BundleImport {
+                input,
+                root,
+                output_dir,
+                overwrite,
+                skip_existing,
+                pretty,
+                format,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let output_dir = output_dir.unwrap_or_else(|| default_saved_profiles_dir(&root));
+                let output_dir = if output_dir.is_absolute() {
+                    output_dir
+                } else {
+                    root.join(output_dir)
+                };
+                let mode = if overwrite {
+                    BundleImportMode::Overwrite
+                } else if skip_existing {
+                    BundleImportMode::SkipExisting
+                } else {
+                    BundleImportMode::Unique
+                };
+                let value = import_profile_bundle_value(&input, &output_dir, mode)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Imported {} profiles into {} ({} skipped)",
+                        value["imported_count"].as_u64().unwrap_or(0),
+                        value["output_dir"].as_str().unwrap_or("<unknown>"),
+                        value["skipped_count"].as_u64().unwrap_or(0)
+                    );
+                }
+            }
             InspectAction::CacheStats { pretty, format } => {
                 let value = cli_surfaces::cache_stats_value()?;
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
@@ -3817,12 +4169,13 @@ async fn main() -> Result<()> {
         Commands::Status {
             root,
             only_hosts,
+            health,
             human,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
-            let value = status_value(&root, &only_hosts)?;
+            let value = status_value_with_health(&root, &only_hosts, health).await?;
             if should_render_doctor_human(human, format, pretty, std::io::stdout().is_terminal()) {
                 print_status_report(&value);
             } else if let Some(format) = output::prefer_structured_output(format, pretty) {
