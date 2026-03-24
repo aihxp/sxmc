@@ -1,6 +1,6 @@
 [package]
 name = "sxmc"
-version = "0.2.32"
+version = "0.2.33"
 edition = "2021"
 description = "One Rust binary to bridge skills, MCP, and APIs into reusable agent, terminal, and automation workflows"
 license = "MIT"

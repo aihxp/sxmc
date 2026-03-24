@@ -631,6 +631,10 @@ pub enum Commands {
         #[arg(long)]
         health: bool,
 
+        /// Exit with code 1 when baked health checks report unhealthy entries
+        #[arg(long, requires = "health")]
+        exit_code: bool,
+
         /// Force the human-readable report even when stdout is not a TTY
         #[arg(long)]
         human: bool,
@@ -669,6 +673,10 @@ pub enum Commands {
         /// Exit with code 1 on the first observed change after the initial frame
         #[arg(long)]
         exit_on_change: bool,
+
+        /// Exit with code 1 when any observed health frame contains unhealthy baked entries
+        #[arg(long, requires = "health")]
+        exit_on_unhealthy: bool,
 
         /// Pretty-print JSON output
         #[arg(long)]

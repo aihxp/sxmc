@@ -848,10 +848,26 @@ env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$S
   "$SXMC" bake create status-health --type stdio --source "$status_bake_source" >/dev/null 2>&1
 status_health_out=$(env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
   "$SXMC" status --health 2>/dev/null)
-if json_check "$status_health_out" "d.get('baked_health',{}).get('healthy_count',0) >= 1 and d.get('baked_health',{}).get('by_source_type',{}).get('stdio',{}).get('count',0) >= 1 and d.get('baked_health',{}).get('panels',{}).get('mcp',{}).get('count',0) >= 1 and 'host_capabilities' in d"; then
+if json_check "$status_health_out" "d.get('baked_health',{}).get('healthy_count',0) >= 1 and d.get('baked_health',{}).get('avg_latency_ms',0) >= 0 and d.get('baked_health',{}).get('by_source_type',{}).get('stdio',{}).get('count',0) >= 1 and d.get('baked_health',{}).get('panels',{}).get('mcp',{}).get('avg_latency_ms',0) >= 0 and 'host_capabilities' in d"; then
   pass "status --health reports baked connection health and host capabilities"
 else
   fail "status --health should report baked health" "${status_health_out:0:220}"
+fi
+
+env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
+  "$SXMC" bake create status-health-bad --type stdio --source definitely-not-a-real-command --skip-validate >/dev/null 2>&1
+if env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
+  "$SXMC" status --health --exit-code >/dev/null 2>&1; then
+  fail "status --health --exit-code should fail when unhealthy bakes exist"
+else
+  pass "status --health --exit-code fails for unhealthy bakes"
+fi
+
+if env HOME="$STATUS_BAKE_HOME" USERPROFILE="$STATUS_BAKE_HOME" XDG_CONFIG_HOME="$STATUS_BAKE_HOME/.config" APPDATA="$STATUS_BAKE_HOME/AppData/Roaming" LOCALAPPDATA="$STATUS_BAKE_HOME/AppData/Local" \
+  "$SXMC" watch --health --exit-on-unhealthy --format ndjson >/dev/null 2>&1; then
+  fail "watch --health --exit-on-unhealthy should fail when unhealthy bakes exist"
+else
+  pass "watch --health --exit-on-unhealthy fails for unhealthy bakes"
 fi
 
 status_compare_root="$TMPDIR_TEST/status-compare-root"

@@ -180,8 +180,9 @@ sxmc doctor --check --fix --only claude-code,cursor --from-cli gh
 sxmc doctor --remove --only claude-code --from-cli gh
 sxmc status --human
 sxmc status --health --format json-pretty
+sxmc status --health --exit-code
 sxmc status --compare-hosts claude-code,cursor --format json-pretty
-sxmc watch --health --format ndjson
+sxmc watch --health --exit-on-unhealthy --format ndjson
 sxmc inspect cli <tool> --depth 1 --format json-pretty
 sxmc inspect cli <tool> --depth 2 --compact --format json-pretty
 sxmc inspect batch git cargo brew --parallel 4 --compact --format json-pretty
@@ -271,11 +272,17 @@ Notes:
   `baked_health` summary plus per-host readiness under `host_capabilities`.
 - `sxmc status --health` also groups checks into MCP/API/spec/graphql panels so
   you can read operational health by surface instead of only by raw bake type.
+- `sxmc status --health` now includes latency and slow-entry summaries so
+  degraded integrations are easier to spot without digging through raw entries.
+- `sxmc status --health --exit-code` turns baked health into a CI-friendly gate
+  that fails whenever unhealthy integrations are present.
 - `sxmc status --compare-hosts claude-code,cursor` highlights readiness,
   doc-presence, and config-presence differences across selected AI hosts.
 - `sxmc watch` polls the same status surface over time, flushes the first frame
   immediately for piped consumers, and can exit non-zero on the first observed
   change after the initial frame with `--exit-on-change`.
+- `sxmc watch --health --exit-on-unhealthy` exits on the first observed frame
+  with unhealthy baked MCP/API integrations.
 - `sxmc inspect batch ...` keeps partial failures in a `failures` array instead
   of failing the whole run on the first missing command.
 - `sxmc inspect batch ... --parallel N` bounds concurrency for larger batch jobs.

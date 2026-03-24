@@ -612,10 +612,72 @@ fn test_status_reports_host_capabilities_and_baked_health() {
         .contains("Claude"));
     assert_eq!(value["baked_health"]["count"], Value::from(1));
     assert_eq!(value["baked_health"]["healthy_count"], Value::from(1));
+    assert!(value["baked_health"]["avg_latency_ms"].as_u64().is_some());
+    assert_eq!(
+        value["baked_health"]["slow_threshold_ms"],
+        Value::from(1000)
+    );
     assert_eq!(
         value["baked_health"]["by_source_type"]["stdio"]["count"],
         Value::from(1)
     );
+    assert!(value["baked_health"]["panels"]["mcp"]["avg_latency_ms"]
+        .as_u64()
+        .is_some());
+}
+
+#[test]
+fn test_status_health_exit_code_fails_for_unhealthy_bakes() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-unhealthy",
+            "--type",
+            "stdio",
+            "--source",
+            "definitely-not-a-real-command",
+            "--skip-validate",
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args(["status", "--health", "--exit-code"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_watch_exit_on_unhealthy_fails_for_unhealthy_bakes() {
+    let temp = tempfile::tempdir().unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-unhealthy-watch",
+            "--type",
+            "stdio",
+            "--source",
+            "definitely-not-a-real-command",
+            "--skip-validate",
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "watch",
+            "--health",
+            "--exit-on-unhealthy",
+            "--format",
+            "ndjson",
+        ])
+        .assert()
+        .failure();
 }
 
 #[test]

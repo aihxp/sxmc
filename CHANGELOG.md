@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.33] - 2026-03-23
+
+### Added
+
+- `sxmc status --health --exit-code` and `sxmc watch --health --exit-on-unhealthy`
+  for CI- and watch-friendly baked integration health gates
+
+### Changed
+
+- `sxmc status --health` now reports latency and slow-entry summaries by source
+  type and panel
+
 ## [0.2.32] - 2026-03-23
 
 ### Added

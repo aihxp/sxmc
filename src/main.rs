@@ -13,7 +13,7 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 
@@ -37,6 +37,7 @@ const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 const PROFILE_CORPUS_SCHEMA: &str = "sxmc_profile_corpus_v1";
 const PROFILE_STALE_DAYS: i64 = 30;
 const PROFILE_BUNDLE_SIGNATURE_ALGORITHM: &str = "hmac-sha256";
+const BAKED_HEALTH_SLOW_MS: u64 = 1_000;
 
 fn resolve_paths(paths: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
     paths.unwrap_or_else(discovery::default_paths)
@@ -2111,16 +2112,27 @@ async fn baked_health_value() -> Result<Value> {
     let mut by_source_type = serde_json::Map::new();
     let mut panels = serde_json::Map::new();
     let configs = store.list();
+    let mut latency_sum_ms = 0u64;
+    let mut max_latency_ms = 0u64;
+    let mut slow_count = 0usize;
     for config in configs {
+        let started = Instant::now();
         let check = validate_bake_config(config).await;
+        let latency_ms = started.elapsed().as_millis() as u64;
         let source_type = format!("{:?}", config.source_type).to_lowercase();
         let healthy = check.is_ok();
+        let slow = latency_ms >= BAKED_HEALTH_SLOW_MS;
         let panel_name = match config.source_type {
             SourceType::Stdio | SourceType::Http => "mcp",
             SourceType::Api => "api",
             SourceType::Spec => "spec",
             SourceType::Graphql => "graphql",
         };
+        latency_sum_ms += latency_ms;
+        max_latency_ms = max_latency_ms.max(latency_ms);
+        if slow {
+            slow_count += 1;
+        }
         let entry = by_source_type
             .entry(source_type.clone())
             .or_insert_with(|| {
@@ -2128,6 +2140,10 @@ async fn baked_health_value() -> Result<Value> {
                     "count": 0,
                     "healthy_count": 0,
                     "unhealthy_count": 0,
+                    "slow_count": 0,
+                    "latency_sum_ms": 0,
+                    "avg_latency_ms": 0,
+                    "max_latency_ms": 0,
                 })
             });
         if let Some(object) = entry.as_object_mut() {
@@ -2140,12 +2156,36 @@ async fn baked_health_value() -> Result<Value> {
             };
             let current = object.get(key).and_then(Value::as_u64).unwrap_or(0) + 1;
             object.insert(key.into(), Value::from(current));
+            let slow_total = object
+                .get("slow_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + u64::from(slow);
+            object.insert("slow_count".into(), Value::from(slow_total));
+            let latency_total = object
+                .get("latency_sum_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + latency_ms;
+            object.insert("latency_sum_ms".into(), Value::from(latency_total));
+            object.insert("avg_latency_ms".into(), Value::from(latency_total / count));
+            let previous_max = object
+                .get("max_latency_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            object.insert(
+                "max_latency_ms".into(),
+                Value::from(previous_max.max(latency_ms)),
+            );
         }
         let panel_entry = json!({
             "name": config.name,
             "source_type": source_type,
             "source": config.source,
+            "panel": panel_name,
             "healthy": healthy,
+            "latency_ms": latency_ms,
+            "slow": slow,
             "error": check.err().map(|error| error.to_string()),
         });
         if let Some(object) = panels
@@ -2155,6 +2195,10 @@ async fn baked_health_value() -> Result<Value> {
                     "count": 0,
                     "healthy_count": 0,
                     "unhealthy_count": 0,
+                    "slow_count": 0,
+                    "latency_sum_ms": 0,
+                    "avg_latency_ms": 0,
+                    "max_latency_ms": 0,
                     "entries": [],
                 })
             })
@@ -2169,6 +2213,27 @@ async fn baked_health_value() -> Result<Value> {
             };
             let current = object.get(key).and_then(Value::as_u64).unwrap_or(0) + 1;
             object.insert(key.into(), Value::from(current));
+            let slow_total = object
+                .get("slow_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + u64::from(slow);
+            object.insert("slow_count".into(), Value::from(slow_total));
+            let latency_total = object
+                .get("latency_sum_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                + latency_ms;
+            object.insert("latency_sum_ms".into(), Value::from(latency_total));
+            object.insert("avg_latency_ms".into(), Value::from(latency_total / count));
+            let previous_max = object
+                .get("max_latency_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            object.insert(
+                "max_latency_ms".into(),
+                Value::from(previous_max.max(latency_ms)),
+            );
             object
                 .entry("entries")
                 .or_insert_with(|| Value::Array(Vec::new()));
@@ -2182,15 +2247,28 @@ async fn baked_health_value() -> Result<Value> {
         .iter()
         .filter(|entry| entry["healthy"].as_bool().unwrap_or(false))
         .count();
+    let total_count = entries.len();
     Ok(json!({
         "checked_at": Utc::now().to_rfc3339(),
-        "count": entries.len(),
+        "count": total_count,
         "healthy_count": healthy_count,
-        "unhealthy_count": entries.len().saturating_sub(healthy_count),
+        "unhealthy_count": total_count.saturating_sub(healthy_count),
+        "slow_count": slow_count,
+        "slow_threshold_ms": BAKED_HEALTH_SLOW_MS,
+        "latency_sum_ms": latency_sum_ms,
+        "avg_latency_ms": if total_count == 0 { 0 } else { latency_sum_ms / total_count as u64 },
+        "max_latency_ms": max_latency_ms,
         "by_source_type": by_source_type,
         "panels": panels,
         "entries": entries,
     }))
+}
+
+fn status_has_unhealthy_baked_health(value: &Value) -> bool {
+    value["baked_health"]["unhealthy_count"]
+        .as_u64()
+        .unwrap_or(0)
+        > 0
 }
 
 async fn status_value_with_health(
@@ -2460,24 +2538,34 @@ fn format_status_report(value: &Value) -> String {
     if let Some(health) = value.get("baked_health") {
         lines.push(String::new());
         lines.push(format!(
-            "Baked connection health: {} healthy, {} unhealthy ({} total)",
+            "Baked connection health: {} healthy, {} unhealthy, {} slow ({} total)",
             health["healthy_count"].as_u64().unwrap_or(0),
             health["unhealthy_count"].as_u64().unwrap_or(0),
+            health["slow_count"].as_u64().unwrap_or(0),
             health["count"].as_u64().unwrap_or(0)
         ));
         if let Some(checked_at) = health["checked_at"].as_str() {
             lines.push(format!("Checked at: {}", checked_at));
         }
+        lines.push(format!(
+            "Latency: avg {}ms, max {}ms, slow threshold {}ms",
+            health["avg_latency_ms"].as_u64().unwrap_or(0),
+            health["max_latency_ms"].as_u64().unwrap_or(0),
+            health["slow_threshold_ms"].as_u64().unwrap_or(0)
+        ));
         if let Some(by_type) = health["by_source_type"].as_object() {
             let mut entries = by_type.iter().collect::<Vec<_>>();
             entries.sort_by(|a, b| a.0.cmp(b.0));
             for (source_type, details) in entries {
                 lines.push(format!(
-                    "- {}: {} healthy, {} unhealthy ({} total)",
+                    "- {}: {} healthy, {} unhealthy, {} slow ({} total, avg {}ms, max {}ms)",
                     source_type,
                     details["healthy_count"].as_u64().unwrap_or(0),
                     details["unhealthy_count"].as_u64().unwrap_or(0),
-                    details["count"].as_u64().unwrap_or(0)
+                    details["slow_count"].as_u64().unwrap_or(0),
+                    details["count"].as_u64().unwrap_or(0),
+                    details["avg_latency_ms"].as_u64().unwrap_or(0),
+                    details["max_latency_ms"].as_u64().unwrap_or(0)
                 ));
             }
         }
@@ -2486,11 +2574,14 @@ fn format_status_report(value: &Value) -> String {
             entries.sort_by(|a, b| a.0.cmp(b.0));
             for (panel, details) in entries {
                 lines.push(format!(
-                    "- panel {}: {} healthy, {} unhealthy ({} total)",
+                    "- panel {}: {} healthy, {} unhealthy, {} slow ({} total, avg {}ms, max {}ms)",
                     panel,
                     details["healthy_count"].as_u64().unwrap_or(0),
                     details["unhealthy_count"].as_u64().unwrap_or(0),
-                    details["count"].as_u64().unwrap_or(0)
+                    details["slow_count"].as_u64().unwrap_or(0),
+                    details["count"].as_u64().unwrap_or(0),
+                    details["avg_latency_ms"].as_u64().unwrap_or(0),
+                    details["max_latency_ms"].as_u64().unwrap_or(0)
                 ));
             }
         }
@@ -2501,9 +2592,10 @@ fn format_status_report(value: &Value) -> String {
                 .take(5)
             {
                 lines.push(format!(
-                    "- {} [{}]: {}",
+                    "- {} [{}] {}ms: {}",
                     entry["name"].as_str().unwrap_or("<unknown>"),
                     entry["source_type"].as_str().unwrap_or("unknown"),
+                    entry["latency_ms"].as_u64().unwrap_or(0),
                     entry["error"].as_str().unwrap_or("unhealthy")
                 ));
             }
@@ -5398,6 +5490,7 @@ async fn main() -> Result<()> {
             only_hosts,
             compare_hosts,
             health,
+            exit_code,
             human,
             pretty,
             format,
@@ -5413,6 +5506,9 @@ async fn main() -> Result<()> {
                 let format = output::resolve_structured_format(format, pretty);
                 println!("{}", output::format_structured_value(&value, format));
             }
+            if exit_code && status_has_unhealthy_baked_health(&value) {
+                std::process::exit(1);
+            }
         }
         Commands::Watch {
             root,
@@ -5421,6 +5517,7 @@ async fn main() -> Result<()> {
             health,
             interval_seconds,
             exit_on_change,
+            exit_on_unhealthy,
             pretty,
             format,
         } => {
@@ -5437,6 +5534,9 @@ async fn main() -> Result<()> {
                     println!("{rendered}");
                     println!();
                     std::io::stdout().flush()?;
+                    if exit_on_unhealthy && status_has_unhealthy_baked_health(&value) {
+                        std::process::exit(1);
+                    }
                     if exit_on_change && !first_frame {
                         std::process::exit(1);
                     }
