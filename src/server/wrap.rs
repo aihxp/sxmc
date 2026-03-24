@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,6 +24,9 @@ use rmcp::transport::streamable_http_server::{
 };
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Map, Value};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -31,9 +35,66 @@ use crate::cli_surfaces::{
     parse_command_spec, CliSurfaceProfile, ConfidenceLevel, ProfileOption, ProfilePositional,
 };
 use crate::error::{Result, SxmcError};
-use crate::executor;
 
 use super::{require_auth, root_handler, HttpAuthConfig, HttpServeLimits};
+
+#[derive(Copy, Clone)]
+enum WrappedStreamKind {
+    Stdout,
+    Stderr,
+}
+
+impl WrappedStreamKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
+}
+
+enum WrappedExecutionEvent {
+    Chunk(WrappedStreamKind, Vec<u8>),
+    Progress(Value),
+}
+
+#[derive(Default)]
+struct WrappedStreamCapture {
+    text: String,
+    bytes: usize,
+    truncated: bool,
+    event_count: u64,
+    events: Vec<Value>,
+}
+
+impl WrappedStreamCapture {
+    fn push_chunk(&mut self, kind: WrappedStreamKind, chunk: &[u8], max_bytes: usize) {
+        self.bytes += chunk.len();
+        self.event_count += 1;
+
+        let chunk_text = String::from_utf8_lossy(chunk).to_string();
+        let stored_text = if self.text.len() < max_bytes {
+            let remaining = max_bytes - self.text.len();
+            let (truncated_chunk, _) = truncate_output(&chunk_text, remaining);
+            self.text.push_str(&truncated_chunk);
+            truncated_chunk
+        } else {
+            String::new()
+        };
+        if self.text.len() >= max_bytes || stored_text.len() < chunk_text.len() {
+            self.truncated = true;
+        }
+
+        self.events.push(json!({
+            "index": self.event_count,
+            "stream": kind.as_str(),
+            "chunk_bytes": chunk.len(),
+            "stored_bytes": stored_text.len(),
+            "text": stored_text,
+            "truncated": stored_text.len() < chunk_text.len(),
+        }));
+    }
+}
 
 #[derive(Clone)]
 pub struct WrappedCliServer {
@@ -180,8 +241,18 @@ impl WrappedCliServer {
         self.working_dir.as_deref()
     }
 
-    fn store_execution_record(&self, record: Value) {
+    fn upsert_execution_record(&self, record: Value) {
+        let execution_id = record["execution_id"].as_u64();
         if let Ok(mut records) = self.execution_records.lock() {
+            if let Some(execution_id) = execution_id {
+                if let Some(existing) = records
+                    .iter_mut()
+                    .find(|item| item["execution_id"].as_u64() == Some(execution_id))
+                {
+                    *existing = record;
+                    return;
+                }
+            }
             records.push_back(record);
             while records.len() > self.execution_history_limit {
                 records.pop_front();
@@ -235,20 +306,147 @@ impl ServerHandler for WrappedCliServer {
 
         let mut args = self.fixed_args.clone();
         args.extend(tool.build_cli_args(request.arguments.as_ref())?);
+        let execution_resource_uri = format!("sxmc-wrap://executions/{}", execution_id);
+        let events_resource_uri = format!("sxmc-wrap://executions/{}/events", execution_id);
+        let argv = std::iter::once(self.executable.clone())
+            .chain(args.clone())
+            .collect::<Vec<_>>();
+        let mut stdout_capture = WrappedStreamCapture::default();
+        let mut stderr_capture = WrappedStreamCapture::default();
+        let mut progress_events = Vec::<Value>::new();
+        let mut timeout = false;
+        let mut exit_code = None::<i32>;
 
-        let progress_task = if self.progress_secs > 0 {
+        let refresh_record = |server: &WrappedCliServer,
+                              status: &str,
+                              stdout_capture: &WrappedStreamCapture,
+                              stderr_capture: &WrappedStreamCapture,
+                              progress_events: &[Value],
+                              elapsed_ms: u64,
+                              exit_code: Option<i32>,
+                              timeout: bool| {
+            server.upsert_execution_record(json!({
+                "execution_id": execution_id,
+                "status": status,
+                "execution_resource_uri": execution_resource_uri,
+                "events_resource_uri": events_resource_uri,
+                "wrapped_command": self.wrapped_command,
+                "tool": tool.name,
+                "summary": self.summary,
+                "argv": argv,
+                "working_dir": self.working_dir,
+                "progress_seconds": self.progress_secs,
+                "progress_event_count": progress_events.len(),
+                "progress_events": progress_events,
+                "stdout": stdout_capture.text,
+                "stdout_bytes": stdout_capture.bytes,
+                "stdout_truncated": stdout_capture.truncated,
+                "stdout_event_count": stdout_capture.event_count,
+                "stdout_events": stdout_capture.events,
+                "stderr": stderr_capture.text,
+                "stderr_bytes": stderr_capture.bytes,
+                "stderr_truncated": stderr_capture.truncated,
+                "stderr_nonempty": !stderr_capture.text.trim().is_empty(),
+                "stderr_event_count": stderr_capture.event_count,
+                "stderr_events": stderr_capture.events,
+                "stream_event_count": stdout_capture.event_count + stderr_capture.event_count,
+                "elapsed_ms": elapsed_ms,
+                "long_running": !progress_events.is_empty()
+                    || stdout_capture.event_count > 1
+                    || stderr_capture.event_count > 0,
+                "timeout_seconds": self.timeout_secs,
+                "timeout": timeout,
+                "exit_code": exit_code,
+            }));
+        };
+
+        refresh_record(
+            self,
+            "running",
+            &stdout_capture,
+            &stderr_capture,
+            &progress_events,
+            0,
+            exit_code,
+            timeout,
+        );
+
+        let mut command = Command::new(&self.executable);
+        command
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(working_dir) = self.working_dir.as_deref().map(Path::new) {
+            command.current_dir(working_dir);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            McpError::internal_error("Wrapped command stdout was not piped".to_string(), None)
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            McpError::internal_error("Wrapped command stderr was not piped".to_string(), None)
+        })?;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<WrappedExecutionEvent>();
+        let stdout_tx = tx.clone();
+        let stdout_handle = tokio::spawn(async move {
+            let mut stdout = stdout;
+            let mut buf = vec![0u8; 4096];
+            loop {
+                match stdout.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        if stdout_tx
+                            .send(WrappedExecutionEvent::Chunk(
+                                WrappedStreamKind::Stdout,
+                                buf[..read].to_vec(),
+                            ))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        let stderr_tx = tx.clone();
+        let stderr_handle = tokio::spawn(async move {
+            let mut stderr = stderr;
+            let mut buf = vec![0u8; 4096];
+            loop {
+                match stderr.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(read) => {
+                        if stderr_tx
+                            .send(WrappedExecutionEvent::Chunk(
+                                WrappedStreamKind::Stderr,
+                                buf[..read].to_vec(),
+                            ))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let progress_done = Arc::new(AtomicBool::new(false));
+        let progress_handle = if self.progress_secs > 0 {
             let command = self.wrapped_command.clone();
             let tool_name = tool.name.clone();
             let progress_secs = self.progress_secs;
-            let done = Arc::new(AtomicBool::new(false));
-            let done_for_task = done.clone();
-            let progress_events = Arc::new(Mutex::new(Vec::new()));
-            let progress_events_for_task = progress_events.clone();
-            let task = tokio::spawn(async move {
+            let done = progress_done.clone();
+            let progress_tx = tx.clone();
+            Some(tokio::spawn(async move {
                 let mut elapsed = progress_secs;
-                while !done_for_task.load(Ordering::Relaxed) {
+                while !done.load(Ordering::Relaxed) {
                     tokio::time::sleep(Duration::from_secs(progress_secs)).await;
-                    if done_for_task.load(Ordering::Relaxed) {
+                    if done.load(Ordering::Relaxed) {
                         break;
                     }
                     let message = format!(
@@ -256,111 +454,149 @@ impl ServerHandler for WrappedCliServer {
                         tool_name, command, elapsed
                     );
                     eprintln!("[sxmc] {}", message);
-                    if let Ok(mut items) = progress_events_for_task.lock() {
-                        items.push(json!({
+                    if progress_tx
+                        .send(WrappedExecutionEvent::Progress(json!({
                             "elapsed_secs": elapsed,
                             "message": message,
-                        }));
+                        })))
+                        .is_err()
+                    {
+                        break;
                     }
                     elapsed += progress_secs;
                 }
-            });
-            Some((done, task, progress_events))
+            }))
         } else {
             None
         };
+        drop(tx);
+
         let started_at = std::time::Instant::now();
-        let execution = executor::execute_command(
-            &self.executable,
-            &args,
-            self.working_dir.as_deref().map(Path::new),
-            self.timeout_secs,
-        )
-        .await;
-        let progress_events = if let Some((done, task, progress_events)) = progress_task {
-            done.store(true, Ordering::Relaxed);
-            let _ = task.await;
-            progress_events
-                .lock()
-                .map(|items| items.clone())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let elapsed_ms = started_at.elapsed().as_millis() as u64;
-        let progress_event_count = progress_events.len() as u64;
-        let long_running = progress_event_count > 0;
-        match execution {
-            Ok(result) => {
-                let (stdout, stdout_truncated) =
-                    truncate_output(&result.stdout, self.max_stdout_bytes);
-                let (stderr, stderr_truncated) =
-                    truncate_output(&result.stderr, self.max_stderr_bytes);
-                let stdout_json = serde_json::from_str::<Value>(&stdout).ok();
-                let machine_friendly_stdout = stdout_json.is_some();
-                let stderr_nonempty = !stderr.trim().is_empty();
-                let payload = json!({
-                    "execution_id": execution_id,
-                    "execution_resource_uri": format!("sxmc-wrap://executions/{}", execution_id),
-                    "wrapped_command": self.wrapped_command,
-                    "tool": tool.name,
-                    "summary": self.summary,
-                    "argv": std::iter::once(self.executable.clone())
-                        .chain(args.clone())
-                        .collect::<Vec<_>>(),
-                    "working_dir": self.working_dir,
-                    "progress_seconds": self.progress_secs,
-                    "progress_event_count": progress_event_count,
-                    "progress_events": progress_events,
-                    "long_running": long_running,
-                    "stdout": stdout,
-                    "stdout_bytes": result.stdout.len(),
-                    "stdout_truncated": stdout_truncated,
-                    "stdout_json": stdout_json,
-                    "machine_friendly_stdout": machine_friendly_stdout,
-                    "stderr": stderr,
-                    "stderr_bytes": result.stderr.len(),
-                    "stderr_truncated": stderr_truncated,
-                    "stderr_nonempty": stderr_nonempty,
-                    "exit_code": result.exit_code,
-                    "elapsed_ms": elapsed_ms,
-                    "timeout_seconds": self.timeout_secs,
-                });
-                self.store_execution_record(payload.clone());
-                let text = serde_json::to_string_pretty(&payload)
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                if result.exit_code == 0 {
-                    Ok(CallToolResult::success(vec![Content::text(text)]))
-                } else {
-                    Ok(CallToolResult::error(vec![Content::text(text)]))
+        let timeout_duration = Duration::from_secs(self.timeout_secs.max(1));
+        let timeout_sleep = tokio::time::sleep(timeout_duration);
+        tokio::pin!(timeout_sleep);
+
+        let mut channel_closed = false;
+        while !(exit_code.is_some() && channel_closed) {
+            tokio::select! {
+                status = child.wait(), if exit_code.is_none() => {
+                    let status = status.map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    exit_code = Some(status.code().unwrap_or(-1));
+                    progress_done.store(true, Ordering::Relaxed);
+                }
+                _ = &mut timeout_sleep, if exit_code.is_none() => {
+                    timeout = true;
+                    progress_done.store(true, Ordering::Relaxed);
+                    let _ = child.kill().await;
+                    let status = child.wait().await.map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    exit_code = Some(status.code().unwrap_or(-1));
+                }
+                maybe_event = rx.recv() => {
+                    match maybe_event {
+                        Some(WrappedExecutionEvent::Chunk(kind, chunk)) => {
+                            match kind {
+                                WrappedStreamKind::Stdout => stdout_capture.push_chunk(kind, &chunk, self.max_stdout_bytes),
+                                WrappedStreamKind::Stderr => stderr_capture.push_chunk(kind, &chunk, self.max_stderr_bytes),
+                            }
+                            refresh_record(
+                                self,
+                                if exit_code.is_some() { "completed" } else { "running" },
+                                &stdout_capture,
+                                &stderr_capture,
+                                &progress_events,
+                                started_at.elapsed().as_millis() as u64,
+                                exit_code,
+                                timeout,
+                            );
+                        }
+                        Some(WrappedExecutionEvent::Progress(event)) => {
+                            progress_events.push(event);
+                            refresh_record(
+                                self,
+                                if exit_code.is_some() { "completed" } else { "running" },
+                                &stdout_capture,
+                                &stderr_capture,
+                                &progress_events,
+                                started_at.elapsed().as_millis() as u64,
+                                exit_code,
+                                timeout,
+                            );
+                        }
+                        None => channel_closed = true,
+                    }
                 }
             }
-            Err(error) => {
-                let timeout = matches!(error, SxmcError::TimeoutError(_));
-                let payload = json!({
-                    "execution_id": execution_id,
-                    "execution_resource_uri": format!("sxmc-wrap://executions/{}", execution_id),
-                    "wrapped_command": self.wrapped_command,
-                    "tool": tool.name,
-                    "summary": self.summary,
-                    "argv": std::iter::once(self.executable.clone())
-                        .chain(args.clone())
-                        .collect::<Vec<_>>(),
-                    "working_dir": self.working_dir,
-                    "progress_seconds": self.progress_secs,
-                    "progress_event_count": progress_event_count,
-                    "progress_events": progress_events,
-                    "long_running": long_running,
-                    "elapsed_ms": elapsed_ms,
-                    "timeout_seconds": self.timeout_secs,
-                    "timeout": timeout,
-                    "error": error.to_string(),
-                });
-                self.store_execution_record(payload.clone());
-                let text = serde_json::to_string_pretty(&payload)
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                Ok(CallToolResult::error(vec![Content::text(text)]))
+        }
+
+        let _ = stdout_handle.await;
+        let _ = stderr_handle.await;
+        if let Some(progress_handle) = progress_handle {
+            let _ = progress_handle.await;
+        }
+        while let Some(event) = rx.recv().await {
+            match event {
+                WrappedExecutionEvent::Chunk(kind, chunk) => match kind {
+                    WrappedStreamKind::Stdout => {
+                        stdout_capture.push_chunk(kind, &chunk, self.max_stdout_bytes)
+                    }
+                    WrappedStreamKind::Stderr => {
+                        stderr_capture.push_chunk(kind, &chunk, self.max_stderr_bytes)
+                    }
+                },
+                WrappedExecutionEvent::Progress(event) => progress_events.push(event),
             }
+        }
+
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let stdout_json = serde_json::from_str::<Value>(&stdout_capture.text).ok();
+        let machine_friendly_stdout = stdout_json.is_some();
+        let payload = json!({
+            "execution_id": execution_id,
+            "status": if timeout { "timed_out" } else { "completed" },
+            "execution_resource_uri": execution_resource_uri,
+            "events_resource_uri": events_resource_uri,
+            "wrapped_command": self.wrapped_command,
+            "tool": tool.name,
+            "summary": self.summary,
+            "argv": argv,
+            "working_dir": self.working_dir,
+            "progress_seconds": self.progress_secs,
+            "progress_event_count": progress_events.len(),
+            "progress_events": progress_events,
+            "stdout": stdout_capture.text,
+            "stdout_bytes": stdout_capture.bytes,
+            "stdout_truncated": stdout_capture.truncated,
+            "stdout_json": stdout_json,
+            "stdout_event_count": stdout_capture.event_count,
+            "stdout_events": stdout_capture.events,
+            "machine_friendly_stdout": machine_friendly_stdout,
+            "stderr": stderr_capture.text,
+            "stderr_bytes": stderr_capture.bytes,
+            "stderr_truncated": stderr_capture.truncated,
+            "stderr_nonempty": !stderr_capture.text.trim().is_empty(),
+            "stderr_event_count": stderr_capture.event_count,
+            "stderr_events": stderr_capture.events,
+            "stream_event_count": stdout_capture.event_count + stderr_capture.event_count,
+            "long_running": !progress_events.is_empty()
+                || stdout_capture.event_count > 1
+                || stderr_capture.event_count > 0,
+            "exit_code": exit_code.unwrap_or(-1),
+            "elapsed_ms": elapsed_ms,
+            "timeout_seconds": self.timeout_secs,
+            "timeout": timeout,
+            "error": if timeout {
+                Value::String(SxmcError::TimeoutError(self.timeout_secs).to_string())
+            } else {
+                Value::Null
+            },
+        });
+        self.upsert_execution_record(payload.clone());
+        let text = serde_json::to_string_pretty(&payload)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if timeout || exit_code.unwrap_or(-1) != 0 {
+            Ok(CallToolResult::error(vec![Content::text(text)]))
+        } else {
+            Ok(CallToolResult::success(vec![Content::text(text)]))
         }
     }
 
@@ -418,6 +654,17 @@ impl ServerHandler for WrappedCliServer {
                     .with_mime_type("application/json"),
                     None,
                 ));
+                resources.push(Annotated::new(
+                    RawResource::new(
+                        format!("sxmc-wrap://executions/{id}/events"),
+                        format!("Wrapped execution {id} event stream ({tool})"),
+                    )
+                    .with_description(
+                        "Captured stdout/stderr/progress events for a wrapped CLI execution.",
+                    )
+                    .with_mime_type("application/json"),
+                    None,
+                ));
             }
         }
         Ok(ListResourcesResult {
@@ -450,6 +697,7 @@ impl ServerHandler for WrappedCliServer {
                                 "exit_code": record["exit_code"],
                                 "long_running": record["long_running"],
                                 "resource_uri": record["execution_resource_uri"],
+                                "events_resource_uri": record["events_resource_uri"],
                             })
                         })
                         .collect::<Vec<_>>()
@@ -459,6 +707,49 @@ impl ServerHandler for WrappedCliServer {
                 serde_json::to_string_pretty(&json!({
                     "count": entries.len(),
                     "entries": entries,
+                }))
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                uri,
+            )]));
+        }
+        if let Some(id_text) = uri
+            .strip_prefix("sxmc-wrap://executions/")
+            .and_then(|value| value.strip_suffix("/events"))
+        {
+            let id = id_text.parse::<u64>().map_err(|_| {
+                McpError::invalid_params(
+                    format!("Invalid wrapped execution event resource: {}", uri),
+                    None,
+                )
+            })?;
+            let payload = self
+                .execution_records
+                .lock()
+                .ok()
+                .and_then(|records| {
+                    records
+                        .iter()
+                        .find(|record| record["execution_id"].as_u64() == Some(id))
+                        .cloned()
+                })
+                .ok_or_else(|| {
+                    McpError::invalid_params(
+                        format!("Unknown wrapped execution event resource: {}", uri),
+                        None,
+                    )
+                })?;
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                serde_json::to_string_pretty(&json!({
+                    "execution_id": payload["execution_id"],
+                    "status": payload["status"],
+                    "count": payload["stream_event_count"].as_u64().unwrap_or(0)
+                        + payload["progress_event_count"].as_u64().unwrap_or(0),
+                    "stdout_event_count": payload["stdout_event_count"],
+                    "stderr_event_count": payload["stderr_event_count"],
+                    "progress_event_count": payload["progress_event_count"],
+                    "stdout_events": payload["stdout_events"],
+                    "stderr_events": payload["stderr_events"],
+                    "progress_events": payload["progress_events"],
                 }))
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?,
                 uri,
@@ -643,6 +934,7 @@ fn build_wrapped_http_router(
             "working_dir": server.working_dir(),
             "timeout_seconds": server.timeout_secs,
             "progress_seconds": server.progress_secs,
+            "streaming_events": true,
             "max_stdout_bytes": server.max_stdout_bytes,
             "max_stderr_bytes": server.max_stderr_bytes,
             "execution_history_limit": server.execution_history_limit,

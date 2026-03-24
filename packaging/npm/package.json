@@ -1,6 +1,6 @@
 {
   "name": "@aihxp/sxmc",
-  "version": "0.2.36",
+  "version": "0.2.37",
   "description": "Thin npm wrapper for the sxmc Rust CLI",
   "license": "MIT",
   "repository": {

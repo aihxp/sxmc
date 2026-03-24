@@ -149,6 +149,50 @@ fn spawn_wrap_http_server(command_spec: &str, extra_args: &[&str]) -> (Child, u1
     (child, port)
 }
 
+fn spawn_registry_http_server(registry_dir: &Path, extra_args: &[&str]) -> (Child, u16) {
+    let mut child = ProcessCommand::new(sxmc_bin_string())
+        .args([
+            "inspect",
+            "registry-serve",
+            "--registry",
+            registry_dir.to_str().unwrap(),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ])
+        .args(extra_args)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let stderr = child.stderr.take().expect("child stderr should be piped");
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut sent = false;
+        for line in reader.lines().map_while(Result::ok) {
+            if !sent {
+                if let Some(port) = line
+                    .split("http://127.0.0.1:")
+                    .nth(1)
+                    .and_then(|tail| tail.split("/index.json").next())
+                    .and_then(|port| port.parse::<u16>().ok())
+                {
+                    let _ = sender.send(port);
+                    sent = true;
+                }
+            }
+        }
+    });
+
+    let port = receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("timed out waiting for registry HTTP server port");
+    wait_for_http_server(port);
+    (child, port)
+}
+
 fn command_stdout(args: &[&str]) -> String {
     let output = ProcessCommand::new(sxmc_bin_string())
         .args(args)
@@ -651,6 +695,11 @@ fn test_wrap_http_exposes_execution_resources() {
     .unwrap();
     assert_eq!(detail["tool"], "hello");
     assert_eq!(detail["execution_resource_uri"], resource_uri);
+    let events_uri = detail["events_resource_uri"].as_str().unwrap().to_string();
+    let events: Value =
+        serde_json::from_str(&command_stdout(&["http", &url, "--resource", &events_uri])).unwrap();
+    assert!(events["stdout_event_count"].as_u64().unwrap_or(0) >= 1);
+    assert_eq!(events["count"].as_u64().unwrap_or(0), 1);
 
     let _ = child.kill();
     let _ = child.wait();
@@ -1309,6 +1358,206 @@ fn test_signed_bundle_export_verify_and_pull_round_trip() {
         .stderr(predicate::str::contains(
             "did not match the expected embedded signature",
         ));
+}
+
+#[test]
+fn test_trust_policy_enforces_signature_quality_and_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let secret = "team-secret";
+    let bundle_path = root.join("policy.bundle.json");
+    command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--bundle-name",
+        "Platform Bundle",
+        "--description",
+        "Team blessed profiles",
+        "--role",
+        "platform",
+        "--hosts",
+        "claude-code,cursor",
+        "--signature-secret",
+        secret,
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+
+    let value = command_json(&[
+        "inspect",
+        "trust-policy",
+        bundle_path.to_str().unwrap(),
+        "--signature-secret",
+        secret,
+        "--require-signature",
+        "--require-verified-signature",
+        "--min-average-quality",
+        "1",
+        "--min-ready-count",
+        "1",
+        "--max-stale-count",
+        "10",
+        "--require-role",
+        "platform",
+        "--require-host",
+        "claude_code,cursor",
+        "--pretty",
+    ]);
+    assert_eq!(value["passed"], Value::Bool(true));
+    assert_eq!(value["report"]["signature"]["verified"], Value::Bool(true));
+    assert!(value["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["passed"].as_bool() == Some(true)));
+}
+
+#[test]
+fn test_registry_sync_mirrors_entries_from_another_registry() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let bundle_path = root.join("sync.bundle.json");
+    command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--bundle-name",
+        "Sync Bundle",
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+
+    let source_registry = root.join("source-registry");
+    command_json(&[
+        "inspect",
+        "registry-init",
+        source_registry.to_str().unwrap(),
+        "--pretty",
+    ]);
+    command_json(&[
+        "inspect",
+        "registry-add",
+        bundle_path.to_str().unwrap(),
+        "--registry",
+        source_registry.to_str().unwrap(),
+        "--pretty",
+    ]);
+
+    let target_registry = root.join("target-registry");
+    let sync = command_json(&[
+        "inspect",
+        "registry-sync",
+        source_registry.to_str().unwrap(),
+        "--registry",
+        target_registry.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(sync["imported_count"], Value::from(1));
+    assert_eq!(sync["error_count"], Value::from(0));
+
+    let target = command_json(&[
+        "inspect",
+        "registry-list",
+        target_registry.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(target["entries"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn test_registry_serve_and_push_support_remote_registry_flow() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let bundle_path = root.join("remote-registry.bundle.json");
+    command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--bundle-name",
+        "Remote Bundle",
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+
+    let registry_dir = root.join("served-registry");
+    let (mut child, port) = spawn_registry_http_server(&registry_dir, &[]);
+    let index_url = format!("http://127.0.0.1:{port}/index.json");
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let push = command_json(&[
+        "inspect",
+        "registry-push",
+        bundle_path.to_str().unwrap(),
+        "--registry",
+        &base_url,
+        "--pretty",
+    ]);
+    assert_eq!(push["transport"], Value::from("http"));
+
+    let sync_target = root.join("synced-registry");
+    let sync = command_json(&[
+        "inspect",
+        "registry-sync",
+        &index_url,
+        "--registry",
+        sync_target.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(sync["imported_count"], Value::from(1));
+
+    let pulled_dir = root.join("remote-registry-pulled");
+    let pulled = command_json(&[
+        "inspect",
+        "registry-pull",
+        "Remote Bundle",
+        "--registry",
+        sync_target.to_str().unwrap(),
+        "--output-dir",
+        pulled_dir.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert_eq!(pulled["import"]["imported_count"], Value::from(1));
+    assert!(pulled_dir.join("git.json").exists());
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

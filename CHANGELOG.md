@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.37] - 2026-03-23
+
+### Added
+
+- `sxmc inspect trust-policy` for enforceable signature, quality, freshness,
+  role, and host gates over profile bundles
+- `sxmc inspect registry-sync` for mirroring bundle entries between local,
+  `file://`, and HTTP-backed registries
+- `sxmc inspect registry-serve` and `sxmc inspect registry-push` for lightweight
+  remote registry hosting and bundle uploads
+
+### Changed
+
+- wrapped CLI MCP servers now capture live stdout/stderr event chunks and
+  expose them under `sxmc-wrap://executions/<id>/events`
+
 ## [0.2.36] - 2026-03-23
 
 ### Added

@@ -1,6 +1,13 @@
 mod cli_args;
 mod command_handlers;
 
+use axum::{
+    extract::{DefaultBodyLimit, Path as AxumPath, State},
+    http::{header, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, put},
+    Json, Router,
+};
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -17,7 +24,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use tower::limit::ConcurrencyLimitLayer;
+use tower_http::limit::RequestBodyLimitLayer;
 
 use cli_args::{
     BakeAction, Cli, Commands, DiffOutputFormat, InitAction, InspectAction, McpAction,
@@ -2370,6 +2379,572 @@ fn trust_report_value(
     })
 }
 
+struct RegistrySourceValue {
+    label: String,
+    registry: Value,
+    base_dir: Option<PathBuf>,
+    base_url: Option<reqwest::Url>,
+}
+
+#[derive(Clone)]
+struct RegistryServerState {
+    registry_dir: PathBuf,
+}
+
+struct TrustPolicyConfig<'a> {
+    require_signature: bool,
+    require_verified_signature: bool,
+    min_average_quality: Option<f64>,
+    max_stale_count: Option<u64>,
+    min_ready_count: Option<u64>,
+    require_role: Option<&'a str>,
+    require_hosts: &'a [String],
+}
+
+async fn read_registry_source(
+    source: &str,
+    headers: &[(String, String)],
+    timeout: Option<Duration>,
+) -> Result<RegistrySourceValue> {
+    if is_http_target(source) {
+        let client = reqwest::Client::builder()
+            .timeout(timeout.unwrap_or(Duration::from_secs(30)))
+            .build()
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to create HTTP client for registry pull: {}",
+                    error
+                ))
+            })?;
+        let response = client
+            .get(source)
+            .headers(request_header_map(headers)?)
+            .send()
+            .await
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to pull registry from '{}': {}",
+                    source, error
+                ))
+            })?
+            .error_for_status()
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to pull registry from '{}': {}",
+                    source, error
+                ))
+            })?;
+        let registry: Value = response.json().await.map_err(|error| {
+            sxmc::error::SxmcError::Other(format!(
+                "Registry response from '{}' was not valid JSON: {}",
+                source, error
+            ))
+        })?;
+        let schema = registry["registry_schema"].as_str().unwrap_or_default();
+        if schema != PROFILE_REGISTRY_SCHEMA {
+            return Err(sxmc::error::SxmcError::Other(format!(
+                "Registry '{}' is not a valid sxmc registry. Expected `registry_schema: {}`.",
+                source, PROFILE_REGISTRY_SCHEMA
+            )));
+        }
+        let mut base_url = reqwest::Url::parse(source).ok();
+        if let Some(url) = base_url.as_mut() {
+            if !url.path().ends_with('/') {
+                let path = url.path().to_string();
+                if let Some((prefix, _)) = path.rsplit_once('/') {
+                    url.set_path(&format!("{}/", prefix));
+                } else {
+                    url.set_path("/");
+                }
+            }
+        }
+        Ok(RegistrySourceValue {
+            label: source.to_string(),
+            registry,
+            base_dir: None,
+            base_url,
+        })
+    } else {
+        let path = if source.starts_with("file://") {
+            file_uri_to_path(source)
+        } else {
+            PathBuf::from(source)
+        };
+        let (registry, base_dir) = if path.is_dir() {
+            (load_registry_value(&path)?, path)
+        } else {
+            let value: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+            let schema = value["registry_schema"].as_str().unwrap_or_default();
+            if schema != PROFILE_REGISTRY_SCHEMA {
+                return Err(sxmc::error::SxmcError::Other(format!(
+                    "Registry '{}' is not a valid sxmc registry. Expected `registry_schema: {}`.",
+                    path.display(),
+                    PROFILE_REGISTRY_SCHEMA
+                )));
+            }
+            (
+                value,
+                path.parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+            )
+        };
+        Ok(RegistrySourceValue {
+            label: source.to_string(),
+            registry,
+            base_dir: Some(base_dir),
+            base_url: None,
+        })
+    }
+}
+
+fn resolve_registry_location(raw: &str, source: &RegistrySourceValue) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    if is_http_target(raw) || raw.starts_with("file://") {
+        return Some(raw.to_string());
+    }
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        return Some(path.display().to_string());
+    }
+    if let Some(base_url) = &source.base_url {
+        if let Ok(url) = base_url.join(raw) {
+            return Some(url.to_string());
+        }
+    }
+    source
+        .base_dir
+        .as_ref()
+        .map(|base_dir| base_dir.join(raw).display().to_string())
+}
+
+fn resolve_registry_entry_source(entry: &Value, source: &RegistrySourceValue) -> Option<String> {
+    for key in ["source", "path"] {
+        if let Some(raw) = entry.get(key).and_then(Value::as_str) {
+            if let Some(resolved) = resolve_registry_location(raw, source) {
+                return Some(resolved);
+            }
+        }
+    }
+    None
+}
+
+async fn registry_sync_value(
+    source: &str,
+    registry_dir: &Path,
+    headers: &[(String, String)],
+    timeout: Option<Duration>,
+) -> Result<Value> {
+    let source_registry = read_registry_source(source, headers, timeout).await?;
+    let entries = source_registry.registry["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let existing = if registry_index_path(registry_dir).exists() {
+        load_registry_value(registry_dir)?
+    } else {
+        registry_init_value(registry_dir)?;
+        load_registry_value(registry_dir)?
+    };
+    let mut known_sha256 = existing["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| entry["sha256"].as_str().map(str::to_string))
+        .collect::<HashSet<_>>();
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+    let mut errors = Vec::new();
+
+    for entry in entries {
+        let name = entry["name"]
+            .as_str()
+            .or_else(|| entry["slug"].as_str())
+            .unwrap_or("<unnamed>")
+            .to_string();
+        let Some(bundle_source) = resolve_registry_entry_source(&entry, &source_registry) else {
+            errors.push(json!({
+                "name": name,
+                "error": "registry entry did not contain a resolvable `source` or `path`",
+            }));
+            continue;
+        };
+        match read_bundle_source(&bundle_source, headers, timeout).await {
+            Ok(bundle_value) => {
+                let expected_sha256 = entry["sha256"].as_str();
+                match verify_bundle_digest(&bundle_value, expected_sha256, &bundle_source) {
+                    Ok(sha256) => {
+                        if known_sha256.contains(&sha256) {
+                            skipped.push(json!({
+                                "name": name,
+                                "source": bundle_source,
+                                "sha256": sha256,
+                                "reason": "already present",
+                            }));
+                            continue;
+                        }
+                        let added = registry_add_bundle_value(
+                            registry_dir,
+                            &bundle_source,
+                            &bundle_value,
+                            &sha256,
+                        )?;
+                        known_sha256.insert(sha256.clone());
+                        imported.push(json!({
+                            "name": name,
+                            "source": bundle_source,
+                            "sha256": sha256,
+                            "entry": added["entry"],
+                        }));
+                    }
+                    Err(error) => errors.push(json!({
+                        "name": name,
+                        "source": bundle_source,
+                        "error": error.to_string(),
+                    })),
+                }
+            }
+            Err(error) => errors.push(json!({
+                "name": name,
+                "source": bundle_source,
+                "error": error.to_string(),
+            })),
+        }
+    }
+
+    Ok(json!({
+        "registry_schema": PROFILE_REGISTRY_SCHEMA,
+        "source": source_registry.label,
+        "registry": registry_dir.display().to_string(),
+        "entry_count": imported.len() + skipped.len() + errors.len(),
+        "imported_count": imported.len(),
+        "skipped_count": skipped.len(),
+        "error_count": errors.len(),
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+    }))
+}
+
+fn normalize_registry_http_target(base: &str, suffix: &str) -> String {
+    if base.ends_with(suffix) {
+        base.to_string()
+    } else if base.ends_with('/') {
+        format!("{}{}", base.trim_end_matches('/'), suffix)
+    } else {
+        format!("{base}{suffix}")
+    }
+}
+
+async fn registry_push_target(
+    registry: &str,
+    source_label: &str,
+    bundle_value: &Value,
+    headers: &[(String, String)],
+    timeout: Option<Duration>,
+) -> Result<Value> {
+    let sha256 = bundle_sha256_from_value(bundle_value)?;
+    if is_http_target(registry) {
+        let target = normalize_registry_http_target(registry, "/bundles");
+        let client = reqwest::Client::builder()
+            .timeout(timeout.unwrap_or(Duration::from_secs(30)))
+            .build()
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to create HTTP client for registry push: {}",
+                    error
+                ))
+            })?;
+        let response = client
+            .put(&target)
+            .headers(request_header_map(headers)?)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec_pretty(bundle_value)?)
+            .send()
+            .await
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to push profile bundle to registry '{}': {}",
+                    registry, error
+                ))
+            })?;
+        let status = response.status();
+        let value: Value = response
+            .error_for_status()
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Failed to push profile bundle to registry '{}': {}",
+                    registry, error
+                ))
+            })?
+            .json()
+            .await
+            .map_err(|error| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Registry push response from '{}' was not valid JSON: {}",
+                    registry, error
+                ))
+            })?;
+        Ok(json!({
+            "registry": registry,
+            "transport": "http",
+            "http_status": status.as_u16(),
+            "sha256": sha256,
+            "source": source_label,
+            "result": value,
+        }))
+    } else {
+        let registry_dir = if registry.starts_with("file://") {
+            file_uri_to_path(registry)
+        } else {
+            PathBuf::from(registry)
+        };
+        let value = registry_add_bundle_value(&registry_dir, source_label, bundle_value, &sha256)?;
+        Ok(json!({
+            "registry": registry_dir.display().to_string(),
+            "transport": "file",
+            "sha256": sha256,
+            "source": source_label,
+            "result": value,
+        }))
+    }
+}
+
+async fn registry_root_handler() -> &'static str {
+    "sxmc profile registry server\nIndex: /index.json\nPush bundles: PUT /bundles\nHealth: /healthz\n"
+}
+
+async fn registry_health_handler(State(state): State<RegistryServerState>) -> Json<Value> {
+    let entry_count = load_registry_value(&state.registry_dir)
+        .ok()
+        .and_then(|value| value["entries"].as_array().map(|items| items.len()))
+        .unwrap_or(0);
+    Json(json!({
+        "name": "sxmc-registry",
+        "version": env!("CARGO_PKG_VERSION"),
+        "status": "ok",
+        "registry": state.registry_dir.display().to_string(),
+        "entry_count": entry_count,
+    }))
+}
+
+async fn registry_index_handler(
+    State(state): State<RegistryServerState>,
+) -> std::result::Result<Json<Value>, (StatusCode, String)> {
+    load_registry_value(&state.registry_dir)
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+async fn registry_bundle_handler(
+    AxumPath(name): AxumPath<String>,
+    State(state): State<RegistryServerState>,
+) -> Response {
+    let path = state.registry_dir.join("bundles").join(&name);
+    match fs::read_to_string(&path) {
+        Ok(body) => (
+            StatusCode::OK,
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            )],
+            body,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "Bundle not found\n").into_response(),
+    }
+}
+
+async fn registry_put_bundle_handler(
+    State(state): State<RegistryServerState>,
+    Json(bundle): Json<Value>,
+) -> std::result::Result<Json<Value>, (StatusCode, String)> {
+    let bundle = validate_bundle_value(bundle, "registry upload")
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    let sha256 = bundle_sha256_from_value(&bundle)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    let slug = bundle["metadata"]["name"]
+        .as_str()
+        .map(bundle_slug)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "bundle".to_string());
+    let public_source = format!("bundles/{}-{}.json", slug, &sha256[..12]);
+    let added = registry_add_bundle_value_with_public_source(
+        &state.registry_dir,
+        "registry-upload",
+        Some(&public_source),
+        &bundle,
+        &sha256,
+    )
+    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(json!({
+        "registry": state.registry_dir.display().to_string(),
+        "sha256": sha256,
+        "result": added,
+    })))
+}
+
+async fn serve_registry_http(
+    registry_dir: &Path,
+    host: &str,
+    port: u16,
+    limits: HttpServeLimits,
+) -> Result<()> {
+    if !registry_index_path(registry_dir).exists() {
+        registry_init_value(registry_dir)?;
+    }
+    let bind_addr = format!("{host}:{port}");
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .map_err(|e| sxmc::error::SxmcError::Other(format!("Failed to bind {bind_addr}: {e}")))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|e| sxmc::error::SxmcError::Other(format!("Failed to read local addr: {e}")))?;
+    let state = RegistryServerState {
+        registry_dir: registry_dir.to_path_buf(),
+    };
+    let router = Router::new()
+        .route("/", get(registry_root_handler))
+        .route("/healthz", get(registry_health_handler))
+        .route("/index.json", get(registry_index_handler))
+        .route("/bundles", put(registry_put_bundle_handler))
+        .route("/bundles/{name}", get(registry_bundle_handler))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(limits.max_request_body_bytes))
+        .layer(RequestBodyLimitLayer::new(limits.max_request_body_bytes))
+        .layer(ConcurrencyLimitLayer::new(limits.max_concurrency));
+
+    eprintln!(
+        "[sxmc] Profile registry server listening at http://{}/index.json",
+        local_addr
+    );
+
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(|e| sxmc::error::SxmcError::Other(format!("Registry HTTP server failed: {e}")))?;
+    Ok(())
+}
+
+fn trust_policy_value(report: &Value, config: TrustPolicyConfig<'_>) -> Value {
+    let normalize_host = |value: &str| value.trim().replace('_', "-").to_lowercase();
+    let signature = &report["signature"];
+    let quality = &report["quality"];
+    let metadata = &report["metadata"];
+    let mut checks = Vec::new();
+
+    if config.require_signature {
+        let passed = signature["present"].as_bool() == Some(true);
+        checks.push(json!({
+            "name": "require_signature",
+            "passed": passed,
+            "detail": if passed { "bundle is signed" } else { "bundle is not signed" },
+        }));
+    }
+    if config.require_verified_signature {
+        let passed = signature["verified"].as_bool() == Some(true);
+        checks.push(json!({
+            "name": "require_verified_signature",
+            "passed": passed,
+            "detail": if passed { "embedded signature verified successfully" } else { "signature verification was not satisfied" },
+        }));
+    }
+    if let Some(min_average_quality) = config.min_average_quality {
+        let actual = quality["average_quality_score"].as_f64().unwrap_or(0.0);
+        let passed = actual >= min_average_quality;
+        checks.push(json!({
+            "name": "min_average_quality",
+            "passed": passed,
+            "expected": min_average_quality,
+            "actual": actual,
+        }));
+    }
+    if let Some(max_stale_count) = config.max_stale_count {
+        let actual = quality["stale_count"].as_u64().unwrap_or(0);
+        let passed = actual <= max_stale_count;
+        checks.push(json!({
+            "name": "max_stale_count",
+            "passed": passed,
+            "expected": max_stale_count,
+            "actual": actual,
+        }));
+    }
+    if let Some(min_ready_count) = config.min_ready_count {
+        let actual = quality["ready_count"].as_u64().unwrap_or(0);
+        let passed = actual >= min_ready_count;
+        checks.push(json!({
+            "name": "min_ready_count",
+            "passed": passed,
+            "expected": min_ready_count,
+            "actual": actual,
+        }));
+    }
+    if let Some(require_role) = config.require_role {
+        let actual = metadata["role"].as_str().unwrap_or_default();
+        let passed = actual == require_role;
+        checks.push(json!({
+            "name": "require_role",
+            "passed": passed,
+            "expected": require_role,
+            "actual": actual,
+        }));
+    }
+    if !config.require_hosts.is_empty() {
+        let actual_hosts = metadata["hosts"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| value.as_str().map(normalize_host))
+            .collect::<HashSet<_>>();
+        let expected_hosts = config
+            .require_hosts
+            .iter()
+            .map(|host| normalize_host(host))
+            .collect::<Vec<_>>();
+        let missing = expected_hosts
+            .iter()
+            .filter(|host| !actual_hosts.contains(host.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut actual_hosts = actual_hosts.into_iter().collect::<Vec<_>>();
+        actual_hosts.sort();
+        checks.push(json!({
+            "name": "require_hosts",
+            "passed": missing.is_empty(),
+            "expected": expected_hosts,
+            "actual": actual_hosts,
+            "missing": missing,
+        }));
+    }
+
+    let passed = checks
+        .iter()
+        .all(|check| check["passed"].as_bool() == Some(true));
+    json!({
+        "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+        "input": report["input"],
+        "passed": passed,
+        "policy": {
+            "require_signature": config.require_signature,
+            "require_verified_signature": config.require_verified_signature,
+            "min_average_quality": config.min_average_quality,
+            "max_stale_count": config.max_stale_count,
+            "min_ready_count": config.min_ready_count,
+            "require_role": config.require_role,
+            "require_hosts": config.require_hosts,
+        },
+        "checks": checks,
+        "report": report,
+    })
+}
+
 fn registry_index_path(dir: &Path) -> PathBuf {
     dir.join("index.json")
 }
@@ -2406,9 +2981,10 @@ fn registry_init_value(dir: &Path) -> Result<Value> {
     }))
 }
 
-fn registry_add_bundle_value(
+fn registry_add_bundle_value_with_public_source(
     dir: &Path,
     source: &str,
+    public_source: Option<&str>,
     bundle_value: &Value,
     sha256: &str,
 ) -> Result<Value> {
@@ -2441,7 +3017,7 @@ fn registry_add_bundle_value(
     let entry = json!({
         "name": name,
         "slug": slug,
-        "source": source,
+        "source": public_source.unwrap_or(source),
         "path": bundle_path.display().to_string(),
         "sha256": sha256,
         "profile_count": bundle_value["profile_count"],
@@ -2461,6 +3037,15 @@ fn registry_add_bundle_value(
         "registry": dir.display().to_string(),
         "entry": entry,
     }))
+}
+
+fn registry_add_bundle_value(
+    dir: &Path,
+    source: &str,
+    bundle_value: &Value,
+    sha256: &str,
+) -> Result<Value> {
+    registry_add_bundle_value_with_public_source(dir, source, None, bundle_value, sha256)
 }
 
 fn registry_pull_value(
@@ -5461,6 +6046,72 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            InspectAction::TrustPolicy {
+                input,
+                auth_headers,
+                timeout_seconds,
+                expected_sha256,
+                signature_secret,
+                public_key,
+                require_signature,
+                require_verified_signature,
+                min_average_quality,
+                max_stale_count,
+                min_ready_count,
+                require_role,
+                require_hosts,
+                exit_code,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let signature_secret = parse_optional_secret(signature_secret)?;
+                let bundle_value =
+                    read_bundle_source(&input, &headers, parse_timeout(timeout_seconds)).await?;
+                let sha256 =
+                    verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &input)?;
+                let signature = verify_bundle_signature(
+                    &bundle_value,
+                    signature_secret.as_deref(),
+                    public_key.as_deref(),
+                    &input,
+                )?;
+                let report = trust_report_value(
+                    &input,
+                    &bundle_value,
+                    sha256,
+                    signature,
+                    expected_sha256.as_deref(),
+                );
+                let policy = trust_policy_value(
+                    &report,
+                    TrustPolicyConfig {
+                        require_signature,
+                        require_verified_signature,
+                        min_average_quality,
+                        max_stale_count,
+                        min_ready_count,
+                        require_role: require_role.as_deref(),
+                        require_hosts: &require_hosts,
+                    },
+                );
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&policy, format));
+                } else {
+                    println!(
+                        "Trust policy for {}: {}",
+                        policy["input"].as_str().unwrap_or("<unknown>"),
+                        if policy["passed"].as_bool() == Some(true) {
+                            "passed"
+                        } else {
+                            "failed"
+                        }
+                    );
+                }
+                if exit_code && policy["passed"].as_bool() != Some(true) {
+                    std::process::exit(1);
+                }
+            }
             InspectAction::RegistryInit {
                 dir,
                 pretty,
@@ -5508,6 +6159,79 @@ async fn main() -> Result<()> {
                             .as_array()
                             .map(|items| items.len())
                             .unwrap_or(0)
+                    );
+                }
+            }
+            InspectAction::RegistryServe {
+                registry,
+                host,
+                port,
+                max_concurrency,
+                max_request_bytes,
+            } => {
+                serve_registry_http(
+                    &registry,
+                    &host,
+                    port,
+                    HttpServeLimits {
+                        max_concurrency,
+                        max_request_body_bytes: max_request_bytes,
+                    },
+                )
+                .await?;
+            }
+            InspectAction::RegistryPush {
+                bundle,
+                registry,
+                auth_headers,
+                timeout_seconds,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let bundle_value =
+                    read_bundle_source(&bundle, &headers, parse_timeout(timeout_seconds)).await?;
+                let value = registry_push_target(
+                    &registry,
+                    &bundle,
+                    &bundle_value,
+                    &headers,
+                    parse_timeout(timeout_seconds),
+                )
+                .await?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Pushed bundle {} to registry {}",
+                        value["sha256"].as_str().unwrap_or("<unknown>"),
+                        value["registry"].as_str().unwrap_or("<unknown>")
+                    );
+                }
+            }
+            InspectAction::RegistrySync {
+                source,
+                registry,
+                auth_headers,
+                timeout_seconds,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let value = registry_sync_value(
+                    &source,
+                    &registry,
+                    &headers,
+                    parse_timeout(timeout_seconds),
+                )
+                .await?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Synced {} bundle entries into registry {}",
+                        value["imported_count"].as_u64().unwrap_or(0),
+                        registry.display()
                     );
                 }
             }

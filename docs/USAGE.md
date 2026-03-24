@@ -147,6 +147,9 @@ Notes:
   `progress_event_count`, `long_running`, and timeout metadata in the final JSON
   payload, so MCP clients can reason about slow or timed-out executions without
   scraping stderr.
+- wrapped executions now capture live `stdout_events` and `stderr_events`, and
+  expose a dedicated event resource at `sxmc-wrap://executions/<id>/events` so
+  clients can poll event streams while a tool is still running.
 - wrapped servers also retain recent execution payloads as MCP-readable
   resources under `sxmc-wrap://executions` and
   `sxmc-wrap://executions/<id>`.
@@ -356,12 +359,25 @@ Notes:
   import.
 - `sxmc inspect trust-report <bundle>` summarizes bundle signature, freshness,
   and average profile quality in one report.
+- `sxmc inspect trust-policy <bundle>` turns those same trust signals into CI
+  gates via `--require-signature`, `--require-verified-signature`,
+  `--min-average-quality`, `--max-stale-count`, `--min-ready-count`,
+  `--require-role`, and `--require-host`, with `--exit-code` for policy
+  enforcement.
 - `sxmc inspect known-good <bundle-or-profile-dir> --command <tool>` ranks saved
   profiles and picks the best current candidate for a command.
 - `sxmc inspect registry-init ./registry` creates a local bundle registry with
   an index and bundle storage directory.
 - `sxmc inspect registry-add <bundle> --registry ./registry` stores a bundle in
   the local registry and records its metadata, digest, and signature details.
+- `sxmc inspect registry-serve --registry ./registry --port 8002` serves that
+  registry over HTTP with an index at `/index.json`, bundle objects under
+  `/bundles/<file>`, and a health endpoint at `/healthz`.
+- `sxmc inspect registry-push <bundle> --registry http://host:8002` uploads a
+  bundle into a served registry and updates its index remotely.
+- `sxmc inspect registry-sync <source> --registry ./registry` mirrors bundle
+  entries from another local, `file://`, or HTTP-backed registry into a local
+  registry while preserving metadata and digest checks.
 - `sxmc inspect registry-pull <name> --registry ./registry` installs the latest
   matching bundle from a local registry into a profile directory.
 - `sxmc inspect diff --format markdown` renders a PR-friendly Markdown summary

@@ -1307,6 +1307,13 @@ else
   fail "inspect trust-report" "${trust_report:0:220}"
 fi
 
+trust_policy=$("$SXMC" inspect trust-policy "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" --require-signature --require-verified-signature --min-average-quality 1 --min-ready-count 1 --max-stale-count 10 --require-role platform --require-host claude_code,cursor 2>/dev/null)
+if json_check "$trust_policy" "d.get('passed') is True and len(d.get('checks',[])) >= 5"; then
+  pass "inspect trust-policy enforces signature, quality, and metadata gates"
+else
+  fail "inspect trust-policy" "${trust_policy:0:220}"
+fi
+
 registry_dir="$TMPDIR_TEST/profile-registry"
 registry_init=$("$SXMC" inspect registry-init "$registry_dir" 2>/dev/null)
 registry_add=$("$SXMC" inspect registry-add "$ed25519_bundle_file" --registry "$registry_dir" 2>/dev/null)
@@ -1317,6 +1324,28 @@ if json_check "$registry_init" "d.get('initialized') is True" && json_check "$re
   pass "local registry init, add, list, and pull round-trip bundles"
 else
   fail "local registry flow" "${registry_pull:0:220}"
+fi
+
+mirror_registry_dir="$TMPDIR_TEST/mirror-registry"
+registry_sync=$("$SXMC" inspect registry-sync "$registry_dir" --registry "$mirror_registry_dir" 2>/dev/null)
+mirror_registry_list=$("$SXMC" inspect registry-list "$mirror_registry_dir" 2>/dev/null)
+if json_check "$registry_sync" "d.get('imported_count',0) >= 1 and d.get('error_count',0) == 0" && json_check "$mirror_registry_list" "len(d.get('entries',[])) >= 1"; then
+  pass "inspect registry-sync mirrors bundle entries into another registry"
+else
+  fail "inspect registry-sync" "${registry_sync:0:220}"
+fi
+
+registry_serve_help=$("$SXMC" inspect registry-serve --help 2>&1)
+registry_push_help=$("$SXMC" inspect registry-push --help 2>&1)
+if echo "$registry_serve_help" | grep -q "port" && echo "$registry_serve_help" | grep -q "registry"; then
+  pass "inspect registry-serve exposes remote registry hosting options"
+else
+  fail "inspect registry-serve --help" "${registry_serve_help:0:220}"
+fi
+if echo "$registry_push_help" | grep -q "registry" && echo "$registry_push_help" | grep -q "timeout-seconds"; then
+  pass "inspect registry-push exposes remote registry upload options"
+else
+  fail "inspect registry-push --help" "${registry_push_help:0:220}"
 fi
 
 watch_ndjson=$(

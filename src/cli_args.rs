@@ -1028,6 +1028,47 @@ pub enum InspectAction {
         #[arg(long, value_enum)]
         format: Option<output::StructuredOutputFormat>,
     },
+    TrustPolicy {
+        input: String,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+        #[arg(long = "expected-sha256", value_name = "HEX")]
+        expected_sha256: Option<String>,
+        #[arg(
+            long = "signature-secret",
+            value_name = "SECRET",
+            conflicts_with = "public_key"
+        )]
+        signature_secret: Option<String>,
+        #[arg(
+            long = "public-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        public_key: Option<PathBuf>,
+        #[arg(long)]
+        require_signature: bool,
+        #[arg(long)]
+        require_verified_signature: bool,
+        #[arg(long)]
+        min_average_quality: Option<f64>,
+        #[arg(long)]
+        max_stale_count: Option<u64>,
+        #[arg(long)]
+        min_ready_count: Option<u64>,
+        #[arg(long)]
+        require_role: Option<String>,
+        #[arg(long = "require-host", value_delimiter = ',')]
+        require_hosts: Vec<String>,
+        #[arg(long)]
+        exit_code: bool,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
     RegistryInit {
         dir: PathBuf,
         #[arg(long)]
@@ -1050,6 +1091,44 @@ pub enum InspectAction {
     },
     RegistryList {
         registry: PathBuf,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistryServe {
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 8002)]
+        port: u16,
+        #[arg(long, default_value_t = 64)]
+        max_concurrency: usize,
+        #[arg(long, default_value_t = 1024 * 1024)]
+        max_request_bytes: usize,
+    },
+    RegistryPush {
+        bundle: String,
+        #[arg(long)]
+        registry: String,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistrySync {
+        source: String,
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]
