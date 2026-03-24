@@ -7,11 +7,13 @@
 //! - OpenAPI sources via [`crate::client::openapi`]
 //! - GraphQL endpoints via [`crate::client::graphql`]
 //! - auto-detected API sources via [`crate::client::api`]
+//! - local SQLite schema sources via [`crate::client::database`]
 
 use rmcp::model::CallToolRequestParams;
 
 pub mod api;
 pub mod commands;
+pub mod database;
 pub mod graphql;
 pub mod mcp_http;
 pub mod mcp_stdio;

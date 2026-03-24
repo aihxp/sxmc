@@ -5044,6 +5044,213 @@ async fn test_graphql_local_list_and_call() {
     handle.abort();
 }
 
+#[test]
+fn test_discover_cli_self_alias_emits_profile() {
+    sxmc()
+        .args([
+            "discover",
+            "cli",
+            &sxmc_bin_string(),
+            "--allow-self",
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"profile_schema\""))
+        .stdout(predicate::str::contains("\"command\": \"sxmc\""));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_discover_api_auto_detects_openapi_list() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let spec = serde_json::json!({
+        "openapi": "3.0.0",
+        "info": { "title": "Discover Pets API", "version": "1.0.0" },
+        "servers": [{ "url": format!("http://{addr}") }],
+        "paths": {
+            "/pets": {
+                "get": {
+                    "operationId": "listPets",
+                    "summary": "List pets",
+                    "responses": { "200": { "description": "ok" } }
+                }
+            }
+        }
+    });
+    let spec_clone = spec.clone();
+    let handle = tokio::spawn(async move {
+        let app = Router::new().route(
+            "/openapi.json",
+            get(move || {
+                let spec = spec_clone.clone();
+                async move { Json(spec) }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let base = format!("http://{addr}/openapi.json");
+    let value = command_json(&["discover", "api", &base, "--list", "--format", "json"]);
+    assert_eq!(value["api_type"], "OpenAPI");
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["operations"][0]["name"], "listPets");
+
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_discover_graphql_local_list_and_call() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        let app = Router::new().route(
+            "/graphql",
+            post(|Json(payload): Json<serde_json::Value>| async move {
+                let query = payload
+                    .get("query")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                if query.contains("__schema") {
+                    Json(serde_json::json!({
+                        "data": {
+                            "__schema": {
+                                "queryType": { "name": "Query" },
+                                "mutationType": null,
+                                "types": [
+                                    {
+                                        "kind": "OBJECT",
+                                        "name": "Query",
+                                        "fields": [
+                                            {
+                                                "name": "hello",
+                                                "args": [],
+                                                "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                            },
+                                            {
+                                                "name": "echo",
+                                                "args": [
+                                                    {
+                                                        "name": "message",
+                                                        "type": { "kind": "SCALAR", "name": "String", "ofType": null },
+                                                        "defaultValue": null
+                                                    }
+                                                ],
+                                                "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "kind": "SCALAR",
+                                        "name": "String",
+                                        "fields": null,
+                                        "inputFields": null,
+                                        "interfaces": null,
+                                        "enumValues": null,
+                                        "possibleTypes": null
+                                    }
+                                ],
+                                "directives": []
+                            }
+                        }
+                    }))
+                } else if query.contains("echo") {
+                    let message = payload
+                        .get("variables")
+                        .and_then(|value| value.get("message"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    Json(serde_json::json!({ "data": { "echo": message } }))
+                } else {
+                    Json(serde_json::json!({ "data": { "hello": "world" } }))
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let base = format!("http://{addr}/graphql");
+
+    sxmc()
+        .args(["discover", "graphql", &base, "--list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hello"))
+        .stdout(predicate::str::contains("echo"));
+
+    sxmc()
+        .args([
+            "discover",
+            "graphql",
+            &base,
+            "echo",
+            "message=hello",
+            "--pretty",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"echo\": \"hello\""));
+
+    handle.abort();
+}
+
+#[test]
+fn test_discover_db_sqlite_lists_tables_and_columns() {
+    let temp = tempfile::tempdir().unwrap();
+    let db_path = temp.path().join("demo.sqlite");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL,
+            active INTEGER DEFAULT 1
+        )",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "CREATE TABLE posts (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL
+        )",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let value = command_json(&[
+        "discover",
+        "db",
+        db_path.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(value["database_type"], "sqlite");
+    assert_eq!(value["count"], 2);
+    assert!(value["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "users" && entry["column_count"] == 3));
+
+    let users = command_json(&[
+        "discover",
+        "db",
+        db_path.to_str().unwrap(),
+        "users",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(users["count"], 1);
+    assert_eq!(users["entries"][0]["name"], "users");
+    assert!(users["entries"][0]["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|column| column["name"] == "email" && column["not_null"] == Value::Bool(true)));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_skills_create_from_local_spec() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

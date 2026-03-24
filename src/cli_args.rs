@@ -358,6 +358,12 @@ pub enum Commands {
         timeout_seconds: Option<u64>,
     },
 
+    /// Discover structured interfaces from CLIs, APIs, and databases
+    Discover {
+        #[command(subcommand)]
+        action: DiscoverAction,
+    },
+
     /// Connect to an OpenAPI spec (explicit)
     Spec {
         /// OpenAPI spec URL or file path
@@ -1194,6 +1200,132 @@ pub enum InspectAction {
         format: Option<output::StructuredOutputFormat>,
         #[arg(long)]
         allow_self: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DiscoverAction {
+    /// Discover the real command surface of a CLI
+    Cli {
+        /// CLI tool or executable path
+        command: String,
+
+        /// Inspection depth used to derive nested command surfaces
+        #[arg(long, default_value_t = 0)]
+        depth: usize,
+
+        /// Return a compact profile shape
+        #[arg(long)]
+        compact: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// Allow inspecting sxmc itself
+        #[arg(long)]
+        allow_self: bool,
+    },
+
+    /// Discover operations from an API source (auto-detects OpenAPI or GraphQL)
+    Api {
+        /// API URL or spec file path
+        source: String,
+
+        /// Operation to call (omit for --list)
+        operation: Option<String>,
+
+        /// Arguments as key=value pairs
+        args: Vec<String>,
+
+        /// List available operations
+        #[arg(long)]
+        list: bool,
+
+        /// Search/filter operations
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format for API responses
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// HTTP headers (Key:Value)
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+
+        /// Network timeout in seconds
+        #[arg(long, value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+    },
+
+    /// Discover operations from a GraphQL endpoint explicitly
+    Graphql {
+        /// GraphQL endpoint URL
+        url: String,
+
+        /// Operation to call (omit for --list)
+        operation: Option<String>,
+
+        /// Arguments as key=value pairs
+        args: Vec<String>,
+
+        /// List available operations
+        #[arg(long)]
+        list: bool,
+
+        /// Search/filter operations
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format for API responses
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+
+        /// HTTP headers (Key:Value)
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+
+        /// Network timeout in seconds
+        #[arg(long, value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+    },
+
+    /// Discover tables and columns from a SQLite database
+    Db {
+        /// SQLite database file path
+        source: String,
+
+        /// Show details for a single table or view
+        table: Option<String>,
+
+        /// List matching tables/views
+        #[arg(long)]
+        list: bool,
+
+        /// Search/filter by table name or SQL definition
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
     },
 }
 

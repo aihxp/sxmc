@@ -29,15 +29,15 @@ use tower::limit::ConcurrencyLimitLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use cli_args::{
-    BakeAction, Cli, Commands, DiffOutputFormat, InitAction, InspectAction, McpAction,
-    McpSessionAction, McpSessionCli, ScaffoldAction, SkillsAction,
+    BakeAction, Cli, Commands, DiffOutputFormat, DiscoverAction, InitAction, InspectAction,
+    McpAction, McpSessionAction, McpSessionCli, ScaffoldAction, SkillsAction,
 };
 use command_handlers::{cmd_api, cmd_skills_info, cmd_skills_list, cmd_skills_run};
 use sxmc::auth::secrets::{resolve_header, resolve_secret};
 use sxmc::bake::config::SourceType;
 use sxmc::bake::{BakeConfig, BakeStore};
 use sxmc::cli_surfaces::{self, AiClientProfile, AiCoverage, ArtifactMode};
-use sxmc::client::{api, graphql, mcp_http, mcp_stdio, openapi};
+use sxmc::client::{api, database, graphql, mcp_http, mcp_stdio, openapi};
 use sxmc::error::Result;
 use sxmc::output;
 use sxmc::security;
@@ -98,6 +98,48 @@ fn parse_optional_secret(secret: Option<String>) -> Result<Option<String>> {
 
 fn parse_timeout(timeout_seconds: Option<u64>) -> Option<Duration> {
     timeout_seconds.map(Duration::from_secs)
+}
+
+fn print_db_discovery_report(value: &Value) {
+    println!(
+        "{} database: {}",
+        value["database_type"].as_str().unwrap_or("unknown"),
+        value["source"].as_str().unwrap_or("<unknown>")
+    );
+    println!(
+        "Discovered {} table/view entries",
+        value["count"].as_u64().unwrap_or(0)
+    );
+
+    if let Some(entries) = value["entries"].as_array() {
+        for entry in entries {
+            println!(
+                "- {} ({}, {} columns)",
+                entry["name"].as_str().unwrap_or("<unknown>"),
+                entry["object_type"].as_str().unwrap_or("object"),
+                entry["column_count"].as_u64().unwrap_or(0)
+            );
+            if let Some(columns) = entry["columns"].as_array() {
+                for column in columns {
+                    println!(
+                        "  - {}: {}{}{}",
+                        column["name"].as_str().unwrap_or("<unknown>"),
+                        column["data_type"].as_str().unwrap_or("unknown"),
+                        if column["not_null"].as_bool().unwrap_or(false) {
+                            " not-null"
+                        } else {
+                            ""
+                        },
+                        if column["primary_key"].as_bool().unwrap_or(false) {
+                            " primary-key"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+            }
+        }
+    }
 }
 
 enum ConnectedMcpClient {
@@ -5173,6 +5215,101 @@ async fn main() -> Result<()> {
                     run_mcp_session(&client, reader, quiet).await
                 };
                 finish_connected_mcp_client(client, result).await?;
+            }
+        },
+
+        Commands::Discover { action } => match action {
+            DiscoverAction::Cli {
+                command,
+                depth,
+                compact,
+                pretty,
+                format,
+                allow_self,
+            } => {
+                let profile = cli_surfaces::inspect_cli_with_depth(&command, allow_self, depth)?;
+                let value = if compact {
+                    cli_surfaces::compact_profile_value(&profile)
+                } else {
+                    cli_surfaces::profile_value(&profile)
+                };
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    let format = output::resolve_structured_format(format, pretty);
+                    println!("{}", output::format_structured_value(&value, format));
+                }
+            }
+            DiscoverAction::Api {
+                source,
+                operation,
+                args,
+                list,
+                search,
+                pretty,
+                format,
+                auth_headers,
+                timeout_seconds,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let client =
+                    api::ApiClient::connect(&source, &headers, parse_timeout(timeout_seconds))
+                        .await?;
+                eprintln!("[sxmc] Detected {} API", client.api_type());
+                let arguments = parse_string_kv_args(&args);
+                cmd_api(
+                    &client,
+                    operation,
+                    &arguments,
+                    list,
+                    search.as_deref(),
+                    pretty,
+                    format,
+                )
+                .await?;
+            }
+            DiscoverAction::Graphql {
+                url,
+                operation,
+                args,
+                list,
+                search,
+                pretty,
+                format,
+                auth_headers,
+                timeout_seconds,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let gql =
+                    graphql::GraphQLClient::connect(&url, &headers, parse_timeout(timeout_seconds))
+                        .await?;
+                let client = api::ApiClient::GraphQL(gql);
+                let arguments = parse_string_kv_args(&args);
+                cmd_api(
+                    &client,
+                    operation,
+                    &arguments,
+                    list,
+                    search.as_deref(),
+                    pretty,
+                    format,
+                )
+                .await?;
+            }
+            DiscoverAction::Db {
+                source,
+                table,
+                list: _,
+                search,
+                pretty,
+                format,
+            } => {
+                let value = database::inspect_sqlite(&source, table.as_deref(), search.as_deref())?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    print_db_discovery_report(&value);
+                }
             }
         },
 
