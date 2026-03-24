@@ -139,7 +139,8 @@ Notes:
 - wrapped tool calls execute the real CLI directly, with argument validation
   driven by the generated MCP schema and a default per-call timeout of 30
   seconds.
-- `sxmc wrap` also supports `--allow-tool`, `--deny-tool`, `--working-dir`,
+- `sxmc wrap` also supports `--allow-tool`, `--deny-tool`, `--allow-option`,
+  `--deny-option`, `--allow-positional`, `--deny-positional`, `--working-dir`,
   bounded stdout/stderr capture, and optional stderr heartbeat progress notes
   for long-running wrapped commands.
 - long-running wrapped calls now also return structured `progress_events`,

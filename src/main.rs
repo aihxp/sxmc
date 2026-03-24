@@ -3768,6 +3768,10 @@ async fn main() -> Result<()> {
             max_stderr_bytes,
             allow_tools,
             deny_tools,
+            allow_options,
+            deny_options,
+            allow_positionals,
+            deny_positionals,
             require_headers,
             bearer_token,
             max_concurrency,
@@ -3795,6 +3799,10 @@ async fn main() -> Result<()> {
                     max_stderr_bytes,
                     allow_tools,
                     deny_tools,
+                    allow_options,
+                    deny_options,
+                    allow_positionals,
+                    deny_positionals,
                 },
             )?;
             let required_headers = parse_headers(&require_headers)?;

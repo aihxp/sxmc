@@ -124,6 +124,30 @@ pub enum Commands {
         #[arg(long = "deny-tool", value_delimiter = ',')]
         deny_tools: Vec<String>,
 
+        /// Only expose these option/property names on generated wrapped tools
+        #[arg(
+            long = "allow-option",
+            value_delimiter = ',',
+            allow_hyphen_values = true
+        )]
+        allow_options: Vec<String>,
+
+        /// Hide these option/property names on generated wrapped tools
+        #[arg(
+            long = "deny-option",
+            value_delimiter = ',',
+            allow_hyphen_values = true
+        )]
+        deny_options: Vec<String>,
+
+        /// Only expose these positional/property names on generated wrapped tools
+        #[arg(long = "allow-positional", value_delimiter = ',')]
+        allow_positionals: Vec<String>,
+
+        /// Hide these positional/property names on generated wrapped tools
+        #[arg(long = "deny-positional", value_delimiter = ',')]
+        deny_positionals: Vec<String>,
+
         /// Require HTTP header(s) for remote MCP access (Key:Value)
         #[arg(long = "require-header", value_name = "K:V")]
         require_headers: Vec<String>,

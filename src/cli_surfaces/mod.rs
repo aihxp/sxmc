@@ -21,6 +21,6 @@ pub use materialize::{
 pub use model::{
     host_profile_spec, AiClientProfile, AiCoverage, ApplyStrategy, ArtifactAudience, ArtifactMode,
     CliSurfaceProfile, ConfidenceLevel, ConfigShape, GeneratedArtifact, HostProfileSpec,
-    ProfileOption, ProfileQualityReport, WriteOutcome, WriteStatus, AI_HOST_SPECS,
-    CLI_AI_HOSTS_LAST_VERIFIED, PROFILE_SCHEMA,
+    ProfileOption, ProfilePositional, ProfileQualityReport, WriteOutcome, WriteStatus,
+    AI_HOST_SPECS, CLI_AI_HOSTS_LAST_VERIFIED, PROFILE_SCHEMA,
 };

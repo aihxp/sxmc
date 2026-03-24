@@ -26,7 +26,9 @@ use tokio_util::sync::CancellationToken;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::cli_surfaces::{parse_command_spec, CliSurfaceProfile, ConfidenceLevel, ProfileOption};
+use crate::cli_surfaces::{
+    parse_command_spec, CliSurfaceProfile, ConfidenceLevel, ProfileOption, ProfilePositional,
+};
 use crate::error::{Result, SxmcError};
 use crate::executor;
 
@@ -43,6 +45,8 @@ pub struct WrappedCliServer {
     max_stdout_bytes: usize,
     max_stderr_bytes: usize,
     summary: String,
+    option_policy: WrappedFilterPolicy,
+    positional_policy: WrappedFilterPolicy,
     tools: Vec<WrappedCliTool>,
     tool_index: HashMap<String, usize>,
 }
@@ -56,6 +60,22 @@ pub struct WrappedCliOptions {
     pub max_stderr_bytes: usize,
     pub allow_tools: Vec<String>,
     pub deny_tools: Vec<String>,
+    pub allow_options: Vec<String>,
+    pub deny_options: Vec<String>,
+    pub allow_positionals: Vec<String>,
+    pub deny_positionals: Vec<String>,
+}
+
+#[derive(Clone, Default)]
+struct WrappedFilterPolicy {
+    allow: HashSet<String>,
+    deny: HashSet<String>,
+}
+
+#[derive(Clone, Default)]
+struct WrappedArgumentPolicies {
+    options: WrappedFilterPolicy,
+    positionals: WrappedFilterPolicy,
 }
 
 #[derive(Clone)]
@@ -95,7 +115,20 @@ pub fn build_wrapped_cli_server(
         ));
     }
 
-    let tools = build_wrapped_tools(profile, &parts, &options.allow_tools, &options.deny_tools);
+    let argument_policies = WrappedArgumentPolicies {
+        options: WrappedFilterPolicy::from_lists(&options.allow_options, &options.deny_options),
+        positionals: WrappedFilterPolicy::from_lists(
+            &options.allow_positionals,
+            &options.deny_positionals,
+        ),
+    };
+    let tools = build_wrapped_tools(
+        profile,
+        &parts,
+        &options.allow_tools,
+        &options.deny_tools,
+        &argument_policies,
+    );
     if tools.is_empty() {
         return Err(SxmcError::Other(format!(
             "sxmc wrap could not derive any MCP tools from '{}'. Re-run with `sxmc inspect cli <tool> --depth 1` to confirm the CLI surface is discoverable.",
@@ -119,6 +152,8 @@ pub fn build_wrapped_cli_server(
         max_stdout_bytes: options.max_stdout_bytes,
         max_stderr_bytes: options.max_stderr_bytes,
         summary: profile.summary.clone(),
+        option_policy: argument_policies.options,
+        positional_policy: argument_policies.positionals,
         tools,
         tool_index,
     })
@@ -503,6 +538,14 @@ fn build_wrapped_http_router(
             "progress_seconds": server.progress_secs,
             "max_stdout_bytes": server.max_stdout_bytes,
             "max_stderr_bytes": server.max_stderr_bytes,
+            "option_policy": {
+                "allow": server.option_policy.rendered_allow(),
+                "deny": server.option_policy.rendered_deny(),
+            },
+            "positional_policy": {
+                "allow": server.positional_policy.rendered_allow(),
+                "deny": server.positional_policy.rendered_deny(),
+            },
         },
     }));
     let mcp_router = Router::new().nest_service("/mcp", service);
@@ -535,6 +578,7 @@ fn build_wrapped_tools(
     base_parts: &[String],
     allow_tools: &[String],
     deny_tools: &[String],
+    argument_policies: &WrappedArgumentPolicies,
 ) -> Vec<WrappedCliTool> {
     let mut tools = Vec::new();
     let mut used_tool_names = HashSet::new();
@@ -561,6 +605,7 @@ fn build_wrapped_tools(
             &subcommand_path,
             Some(&subcommand.summary),
             detail_profile,
+            argument_policies,
             &mut used_tool_names,
         ));
     }
@@ -571,6 +616,7 @@ fn build_wrapped_tools(
             &[],
             Some(&profile.summary),
             profile,
+            argument_policies,
             &mut used_tool_names,
         ));
     }
@@ -599,6 +645,7 @@ fn build_wrapped_tool(
     subcommand_path: &[String],
     fallback_summary: Option<&str>,
     profile: &CliSurfaceProfile,
+    argument_policies: &WrappedArgumentPolicies,
     used_tool_names: &mut HashSet<String>,
 ) -> WrappedCliTool {
     let mut props = Map::new();
@@ -607,7 +654,11 @@ fn build_wrapped_tool(
     let mut options = Vec::new();
     let mut positionals = Vec::new();
 
-    for positional in &profile.positionals {
+    for positional in profile
+        .positionals
+        .iter()
+        .filter(|positional| argument_policies.positionals.allows_positional(positional))
+    {
         let property = unique_property_name(
             &sanitize_property_name(&positional.name),
             &allowed_properties,
@@ -633,7 +684,11 @@ fn build_wrapped_tool(
         });
     }
 
-    for option in &profile.options {
+    for option in profile
+        .options
+        .iter()
+        .filter(|option| argument_policies.options.allows_option(option))
+    {
         let property = option_property_name(option, &allowed_properties);
         allowed_properties.insert(property.clone());
         props.insert(property.clone(), option_schema(option));
@@ -712,24 +767,40 @@ fn option_property_name(option: &ProfileOption, used: &HashSet<String>) -> Strin
 
 fn option_schema(option: &ProfileOption) -> Value {
     if option.value_name.is_some() {
-        json!({
+        let value_name = option.value_name.as_deref().unwrap_or_default();
+        let repeated = value_name.contains("...")
+            || value_name.contains(',')
+            || value_name.chars().all(|ch| !ch.is_ascii_lowercase()) && value_name.ends_with('S');
+        let scalar_schema = json!({
             "oneOf": [
                 {"type": "string"},
                 {"type": "number"},
-                {"type": "boolean"},
-                {
-                    "type": "array",
-                    "items": {
-                        "oneOf": [
-                            {"type": "string"},
-                            {"type": "number"},
-                            {"type": "boolean"}
-                        ]
+                {"type": "boolean"}
+            ]
+        });
+        let value_schema = if repeated {
+            json!({
+                "oneOf": [
+                    scalar_schema.clone(),
+                    {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": scalar_schema,
                     }
-                }
-            ],
-            "description": option.summary.clone().unwrap_or_else(|| format!("Value for `{}`.", option.name)),
-        })
+                ],
+                "description": option.summary.clone().unwrap_or_else(|| format!("Value for `{}`.", option.name)),
+            })
+        } else {
+            json!({
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "number"},
+                    {"type": "boolean"}
+                ],
+                "description": option.summary.clone().unwrap_or_else(|| format!("Value for `{}`.", option.name)),
+            })
+        };
+        value_schema
     } else {
         json!({
             "type": "boolean",
@@ -851,6 +922,62 @@ fn sanitize_property_name(input: &str) -> String {
         }
     }
     out.trim_matches('_').to_string()
+}
+
+impl WrappedFilterPolicy {
+    fn from_lists(allow: &[String], deny: &[String]) -> Self {
+        Self {
+            allow: allow
+                .iter()
+                .map(|item| sanitize_property_name(item))
+                .filter(|item| !item.is_empty())
+                .collect(),
+            deny: deny
+                .iter()
+                .map(|item| sanitize_property_name(item))
+                .filter(|item| !item.is_empty())
+                .collect(),
+        }
+    }
+
+    fn allowed(&self, identifiers: impl IntoIterator<Item = String>) -> bool {
+        let identifiers = identifiers
+            .into_iter()
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+        if identifiers.iter().any(|item| self.deny.contains(item)) {
+            return false;
+        }
+        self.allow.is_empty() || identifiers.iter().any(|item| self.allow.contains(item))
+    }
+
+    fn allows_option(&self, option: &ProfileOption) -> bool {
+        let mut identifiers = vec![sanitize_property_name(&option.name)];
+        if let Some(short) = &option.short {
+            identifiers.push(sanitize_property_name(short));
+            identifiers.push(sanitize_property_name(&format!("-{}", short)));
+        }
+        if let Some(long) = option.name.strip_prefix("--") {
+            identifiers.push(sanitize_property_name(long));
+        }
+        self.allowed(identifiers)
+    }
+
+    fn allows_positional(&self, positional: &ProfilePositional) -> bool {
+        self.allowed(vec![sanitize_property_name(&positional.name)])
+    }
+
+    fn rendered_allow(&self) -> Vec<String> {
+        let mut items = self.allow.iter().cloned().collect::<Vec<_>>();
+        items.sort();
+        items
+    }
+
+    fn rendered_deny(&self) -> Vec<String> {
+        let mut items = self.deny.iter().cloned().collect::<Vec<_>>();
+        items.sort();
+        items
+    }
 }
 
 fn unique_property_name(seed: &str, used: &HashSet<String>) -> String {

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.35] - 2026-03-23
+
+### Changed
+
+- `sxmc wrap` now supports argument-level execution boundaries with
+  `--allow-option`, `--deny-option`, `--allow-positional`, and
+  `--deny-positional`, so generated MCP contracts can expose only trusted CLI
+  inputs
+- wrapped CLI schemas now tighten single-value options to scalar inputs unless
+  the inspected value name looks repeated
+
 ## [0.2.34] - 2026-03-23
 
 ### Changed

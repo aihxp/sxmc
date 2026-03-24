@@ -1443,6 +1443,12 @@ else
   fail "wrap --help should mention allow-tool and working-dir"
 fi
 
+if echo "$wrap_help" | grep -q "deny-option" && echo "$wrap_help" | grep -q "deny-positional"; then
+  pass "wrap --help mentions argument boundary controls"
+else
+  fail "wrap --help should mention deny-option and deny-positional"
+fi
+
 fake_wrap_cli="$TMPDIR_TEST/fake-wrap-cli"
 cat > "$fake_wrap_cli" <<'EOF'
 #!/bin/sh
@@ -1560,6 +1566,30 @@ if json_check "$slow_wrap_call" "d.get('tool') == 'slow' and d.get('timeout') is
   pass "wrap reports structured progress events and timeout metadata"
 else
   fail "wrap progress events" "${slow_wrap_call:0:220}"
+fi
+
+filtered_wrap_spec=$(python3 - <<'PY' "$SXMC" "$fake_wrap_cli"
+import json, sys
+print(json.dumps([
+    sys.argv[1], "wrap", sys.argv[2],
+    "--deny-option=--name",
+    "--deny-positional", "target"
+]))
+PY
+)
+
+filtered_wrap_call=$("$SXMC" stdio "$filtered_wrap_spec" hello name=Sam --pretty 2>&1 || true)
+if echo "$filtered_wrap_call" | grep -q "Unknown argument 'name'"; then
+  pass "wrap rejects blocked option inputs"
+else
+  fail "wrap should reject blocked option inputs" "${filtered_wrap_call:0:220}"
+fi
+
+filtered_wrap_allowed=$("$SXMC" stdio "$filtered_wrap_spec" hello excited=true --pretty 2>/dev/null)
+if json_check "$filtered_wrap_allowed" "'hello world!' in d.get('stdout','')"; then
+  pass "wrap still executes allowed filtered inputs"
+else
+  fail "wrap should execute allowed filtered inputs" "${filtered_wrap_allowed:0:220}"
 fi
 
 # ============================================================================

@@ -460,6 +460,47 @@ fn test_wrap_respects_allow_tool_and_output_limits() {
 
 #[cfg(not(windows))]
 #[test]
+fn test_wrap_argument_filters_shrink_contract_and_reject_blocked_inputs() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_wrappable_cli(temp.path());
+    let spec = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "wrap".to_string(),
+        fake.to_string_lossy().into_owned(),
+        "--deny-option=--name".to_string(),
+        "--deny-positional".to_string(),
+        "target".to_string(),
+    ])
+    .unwrap();
+
+    let described = command_stdout(&["stdio", &spec, "--describe-tool", "hello"]);
+    assert!(described.contains("excited"));
+    assert!(!described.contains("Override the target name."));
+    assert!(!described.contains("Missing required positional 'target'"));
+
+    let output = ProcessCommand::new(sxmc_bin_string())
+        .args(["stdio", &spec, "hello", "name=Sam", "--pretty"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown argument 'name'"));
+
+    let allowed = ProcessCommand::new(sxmc_bin_string())
+        .args(["stdio", &spec, "hello", "excited=true", "--pretty"])
+        .output()
+        .unwrap();
+    assert!(allowed.status.success());
+    let value: Value = serde_json::from_slice(&allowed.stdout).unwrap();
+    assert_eq!(value["tool"], "hello");
+    assert!(value["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("hello world!"));
+}
+
+#[cfg(not(windows))]
+#[test]
 fn test_wrap_respects_working_dir() {
     let temp = tempfile::tempdir().unwrap();
     let fake = write_fake_wrappable_cli(temp.path());
