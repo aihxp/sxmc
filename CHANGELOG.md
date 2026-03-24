@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.36] - 2026-03-23
+
+### Added
+
+- `sxmc inspect bundle-keygen` for Ed25519 bundle signing key generation
+- Ed25519 signing/verification support for bundle export, publish, verify, and
+  pull
+- `sxmc inspect known-good` for selecting the best saved profile or bundled
+  profile for a command
+- `sxmc inspect trust-report` for bundle trust, freshness, and quality summaries
+- local registry primitives:
+  - `sxmc inspect registry-init`
+  - `sxmc inspect registry-add`
+  - `sxmc inspect registry-list`
+  - `sxmc inspect registry-pull`
+
+### Changed
+
+- wrapped CLI MCP servers now retain recent execution payloads as readable
+  resources under `sxmc-wrap://executions`
+
 ## [0.2.35] - 2026-03-23
 
 ### Changed

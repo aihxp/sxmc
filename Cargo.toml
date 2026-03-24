@@ -1,6 +1,6 @@
 [package]
 name = "sxmc"
-version = "0.2.35"
+version = "0.2.36"
 edition = "2021"
 description = "One Rust binary to bridge skills, MCP, and APIs into reusable agent, terminal, and automation workflows"
 license = "MIT"
@@ -56,6 +56,8 @@ url = "2"
 shlex = "1"
 sha2 = "0.10"
 hmac = "0.12"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
 
 [dev-dependencies]
 assert_cmd = "2"

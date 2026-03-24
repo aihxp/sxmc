@@ -147,6 +147,9 @@ Notes:
   `progress_event_count`, `long_running`, and timeout metadata in the final JSON
   payload, so MCP clients can reason about slow or timed-out executions without
   scraping stderr.
+- wrapped servers also retain recent execution payloads as MCP-readable
+  resources under `sxmc-wrap://executions` and
+  `sxmc-wrap://executions/<id>`.
 
 ## Use APIs As CLIs
 
@@ -333,18 +336,34 @@ Notes:
   `--overwrite` or `--skip-existing` controls when files already exist.
 - `sxmc inspect bundle-verify <bundle>` validates a bundle schema and reports
   its canonical SHA-256 digest, with optional `--expected-sha256` enforcement
-  and optional embedded-signature verification via `--signature-secret`.
+  and optional embedded-signature verification via `--signature-secret` or
+  `--public-key`.
+- `sxmc inspect bundle-keygen --output-dir .sxmc/keys` generates an Ed25519
+  signing keypair for portable bundle signing.
 - `sxmc inspect bundle-export --signature-secret env:SXMC_BUNDLE_SECRET ...`
   embeds an HMAC-SHA256 signature into the bundle so downstream pulls can verify
   authenticity without relying on transport trust alone.
+- `sxmc inspect bundle-export --signing-key .sxmc/keys/bundle-signing.key.json ...`
+  embeds an Ed25519 signature plus the matching public key into the bundle.
 - `sxmc publish <target>` wraps bundle export plus transport, so you can write
   a team bundle directly to a file path, `file://` URI, or HTTP(S) endpoint,
   and its report includes the canonical bundle SHA-256 plus any embedded
   signature metadata.
 - `sxmc pull <source>` fetches a published bundle from a file path, `file://`
   URI, or HTTP(S) endpoint and restores it into a local profile directory, with
-  optional `--expected-sha256` and `--signature-secret` verification before
+  optional `--expected-sha256`, `--signature-secret`, or `--public-key`
+  verification before
   import.
+- `sxmc inspect trust-report <bundle>` summarizes bundle signature, freshness,
+  and average profile quality in one report.
+- `sxmc inspect known-good <bundle-or-profile-dir> --command <tool>` ranks saved
+  profiles and picks the best current candidate for a command.
+- `sxmc inspect registry-init ./registry` creates a local bundle registry with
+  an index and bundle storage directory.
+- `sxmc inspect registry-add <bundle> --registry ./registry` stores a bundle in
+  the local registry and records its metadata, digest, and signature details.
+- `sxmc inspect registry-pull <name> --registry ./registry` installs the latest
+  matching bundle from a local registry into a profile directory.
 - `sxmc inspect diff --format markdown` renders a PR-friendly Markdown summary
   of summary, subcommand, option, and environment deltas.
 - `sxmc inspect diff --watch 3` re-runs the diff every three seconds, and each

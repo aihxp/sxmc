@@ -4,7 +4,9 @@ mod command_handlers;
 use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hmac::{Hmac, Mac};
+use rand::rngs::OsRng;
 use rmcp::model::{Prompt, Resource, ServerInfo, Tool};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -35,8 +37,10 @@ use sxmc::skills::{discovery, generator, parser};
 
 const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 const PROFILE_CORPUS_SCHEMA: &str = "sxmc_profile_corpus_v1";
+const PROFILE_REGISTRY_SCHEMA: &str = "sxmc_profile_registry_v1";
 const PROFILE_STALE_DAYS: i64 = 30;
 const PROFILE_BUNDLE_SIGNATURE_ALGORITHM: &str = "hmac-sha256";
+const PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519: &str = "ed25519";
 const BAKED_HEALTH_SLOW_MS: u64 = 1_000;
 
 fn resolve_paths(paths: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
@@ -1193,6 +1197,30 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
     out
 }
 
+fn hex_to_bytes(input: &str) -> Result<Vec<u8>> {
+    let trimmed = input.trim();
+    if !trimmed.len().is_multiple_of(2) {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Expected an even-length hex string, got {} characters",
+            trimmed.len()
+        )));
+    }
+    let mut out = Vec::with_capacity(trimmed.len() / 2);
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let pair = std::str::from_utf8(&bytes[index..index + 2]).map_err(|error| {
+            sxmc::error::SxmcError::Other(format!("Invalid UTF-8 in hex string: {}", error))
+        })?;
+        let value = u8::from_str_radix(pair, 16).map_err(|error| {
+            sxmc::error::SxmcError::Other(format!("Invalid hex byte '{}': {}", pair, error))
+        })?;
+        out.push(value);
+        index += 2;
+    }
+    Ok(out)
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     bytes_to_hex(&Sha256::digest(bytes))
 }
@@ -1305,7 +1333,63 @@ fn bundle_signature_from_value(value: &Value, secret: &str) -> Result<String> {
     Ok(bytes_to_hex(bytes.as_slice()))
 }
 
-fn sign_bundle_value(mut value: Value, signature_secret: Option<&str>) -> Result<Value> {
+fn load_signing_key(path: &Path) -> Result<(SigningKey, String)> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    let seed_hex = value.get("seed").and_then(Value::as_str).ok_or_else(|| {
+        sxmc::error::SxmcError::Other(format!(
+            "Signing key '{}' is missing a `seed` field.",
+            path.display()
+        ))
+    })?;
+    let seed = hex_to_bytes(seed_hex)?;
+    let seed: [u8; 32] = seed.try_into().map_err(|_| {
+        sxmc::error::SxmcError::Other(format!(
+            "Signing key '{}' must contain a 32-byte Ed25519 seed.",
+            path.display()
+        ))
+    })?;
+    let signing_key = SigningKey::from_bytes(&seed);
+    let public_key = bytes_to_hex(signing_key.verifying_key().as_bytes());
+    Ok((signing_key, public_key))
+}
+
+fn load_verifying_key(path: &Path) -> Result<VerifyingKey> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    let public_hex = value
+        .get("public_key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            sxmc::error::SxmcError::Other(format!(
+                "Public key '{}' is missing a `public_key` field.",
+                path.display()
+            ))
+        })?;
+    let public = hex_to_bytes(public_hex)?;
+    let public: [u8; 32] = public.try_into().map_err(|_| {
+        sxmc::error::SxmcError::Other(format!(
+            "Public key '{}' must contain a 32-byte Ed25519 public key.",
+            path.display()
+        ))
+    })?;
+    VerifyingKey::from_bytes(&public).map_err(|error| {
+        sxmc::error::SxmcError::Other(format!(
+            "Failed to decode Ed25519 public key '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn ed25519_signature_from_value(value: &Value, signing_key: &SigningKey) -> Result<String> {
+    let payload = serde_json::to_vec(&unsigned_bundle_value(value))?;
+    Ok(bytes_to_hex(&signing_key.sign(&payload).to_bytes()))
+}
+
+fn sign_bundle_value(
+    mut value: Value,
+    signature_secret: Option<&str>,
+    signing_key: Option<&Path>,
+) -> Result<Value> {
     if let Some(secret) = signature_secret {
         let signature = bundle_signature_from_value(&value, secret)?;
         if let Some(object) = value.as_object_mut() {
@@ -1314,6 +1398,19 @@ fn sign_bundle_value(mut value: Value, signature_secret: Option<&str>) -> Result
                 json!({
                     "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM,
                     "value": signature,
+                }),
+            );
+        }
+    } else if let Some(signing_key_path) = signing_key {
+        let (signing_key, public_key) = load_signing_key(signing_key_path)?;
+        let signature = ed25519_signature_from_value(&value, &signing_key)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "signature".into(),
+                json!({
+                    "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519,
+                    "value": signature,
+                    "public_key": public_key,
                 }),
             );
         }
@@ -1327,11 +1424,13 @@ fn bundle_signature_report(value: &Value) -> Value {
             "present": true,
             "algorithm": signature.get("algorithm").and_then(Value::as_str),
             "value": signature.get("value").and_then(Value::as_str),
+            "public_key": signature.get("public_key").and_then(Value::as_str),
         }),
         _ => json!({
             "present": false,
             "algorithm": Value::Null,
             "value": Value::Null,
+            "public_key": Value::Null,
         }),
     }
 }
@@ -1339,12 +1438,13 @@ fn bundle_signature_report(value: &Value) -> Value {
 fn verify_bundle_signature(
     value: &Value,
     signature_secret: Option<&str>,
+    public_key: Option<&Path>,
     source_label: &str,
 ) -> Result<Value> {
     let base = bundle_signature_report(value);
-    let Some(secret) = signature_secret else {
+    if signature_secret.is_none() && public_key.is_none() {
         return Ok(base);
-    };
+    }
     let signature = value
         .get("signature")
         .and_then(Value::as_object)
@@ -1358,12 +1458,6 @@ fn verify_bundle_signature(
         .get("algorithm")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if algorithm != PROFILE_BUNDLE_SIGNATURE_ALGORITHM {
-        return Err(sxmc::error::SxmcError::Other(format!(
-            "Bundle source '{}' uses unsupported signature algorithm '{}'. Expected '{}'.",
-            source_label, algorithm, PROFILE_BUNDLE_SIGNATURE_ALGORITHM
-        )));
-    }
     let expected = signature
         .get("value")
         .and_then(Value::as_str)
@@ -1374,12 +1468,86 @@ fn verify_bundle_signature(
                 source_label
             ))
         })?;
-    let actual = bundle_signature_from_value(value, secret)?;
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(sxmc::error::SxmcError::Other(format!(
-            "Bundle source '{}' did not match the expected embedded signature.\nExpected: {}\nActual:   {}",
-            source_label, expected, actual
-        )));
+    match algorithm {
+        PROFILE_BUNDLE_SIGNATURE_ALGORITHM => {
+            let secret = signature_secret.ok_or_else(|| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Bundle source '{}' uses HMAC signature verification. Re-run with --signature-secret.",
+                    source_label
+                ))
+            })?;
+            let actual = bundle_signature_from_value(value, secret)?;
+            if !actual.eq_ignore_ascii_case(expected) {
+                return Err(sxmc::error::SxmcError::Other(format!(
+                    "Bundle source '{}' did not match the expected embedded signature.\nExpected: {}\nActual:   {}",
+                    source_label, expected, actual
+                )));
+            }
+        }
+        PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519 => {
+            let embedded_public = signature
+                .get("public_key")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    sxmc::error::SxmcError::Other(format!(
+                        "Bundle source '{}' is missing an embedded Ed25519 public key.",
+                        source_label
+                    ))
+                })?;
+            let verifying_key = if let Some(path) = public_key {
+                let key = load_verifying_key(path)?;
+                let expected_key = bytes_to_hex(key.as_bytes());
+                if !expected_key.eq_ignore_ascii_case(embedded_public) {
+                    return Err(sxmc::error::SxmcError::Other(format!(
+                        "Bundle source '{}' was signed by a different public key than '{}'.",
+                        source_label,
+                        path.display()
+                    )));
+                }
+                key
+            } else {
+                let bytes = hex_to_bytes(embedded_public)?;
+                let bytes: [u8; 32] = bytes.try_into().map_err(|_| {
+                    sxmc::error::SxmcError::Other(format!(
+                        "Bundle source '{}' embeds an invalid Ed25519 public key.",
+                        source_label
+                    ))
+                })?;
+                VerifyingKey::from_bytes(&bytes).map_err(|error| {
+                    sxmc::error::SxmcError::Other(format!(
+                        "Failed to decode embedded Ed25519 public key for '{}': {}",
+                        source_label, error
+                    ))
+                })?
+            };
+            let signature_bytes = hex_to_bytes(expected)?;
+            let signature_bytes: [u8; 64] = signature_bytes.try_into().map_err(|_| {
+                sxmc::error::SxmcError::Other(format!(
+                    "Bundle source '{}' embeds an invalid Ed25519 signature.",
+                    source_label
+                ))
+            })?;
+            let signature = Signature::from_bytes(&signature_bytes);
+            let payload = serde_json::to_vec(&unsigned_bundle_value(value))?;
+            verifying_key
+                .verify(&payload, &signature)
+                .map_err(|error| {
+                    sxmc::error::SxmcError::Other(format!(
+                        "Bundle source '{}' did not match the embedded Ed25519 signature: {}",
+                        source_label, error
+                    ))
+                })?;
+        }
+        other => {
+            return Err(sxmc::error::SxmcError::Other(format!(
+                "Bundle source '{}' uses unsupported signature algorithm '{}'. Expected '{}' or '{}'.",
+                source_label,
+                other,
+                PROFILE_BUNDLE_SIGNATURE_ALGORITHM,
+                PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519
+            )));
+        }
     }
     let mut verified = base;
     if let Some(object) = verified.as_object_mut() {
@@ -2032,6 +2200,302 @@ fn corpus_query_value(
         "match_count": total_matches,
         "entries": entries,
     })
+}
+
+fn generate_bundle_keypair_value(output_dir: &Path) -> Result<Value> {
+    fs::create_dir_all(output_dir)?;
+    let private_path = output_dir.join("bundle-signing.key.json");
+    let public_path = output_dir.join("bundle-signing.pub.json");
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    let private_value = json!({
+        "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519,
+        "seed": bytes_to_hex(&signing_key.to_bytes()),
+        "public_key": bytes_to_hex(verifying_key.as_bytes()),
+    });
+    let public_value = json!({
+        "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519,
+        "public_key": bytes_to_hex(verifying_key.as_bytes()),
+    });
+    fs::write(&private_path, serde_json::to_string_pretty(&private_value)?)?;
+    fs::write(&public_path, serde_json::to_string_pretty(&public_value)?)?;
+    Ok(json!({
+        "algorithm": PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519,
+        "private_key": private_path.display().to_string(),
+        "public_key": public_path.display().to_string(),
+        "fingerprint": sha256_hex(verifying_key.as_bytes()),
+    }))
+}
+
+fn load_profiles_from_intelligence_input(
+    input: &Path,
+) -> Result<Vec<(String, cli_surfaces::CliSurfaceProfile)>> {
+    if input.is_dir() {
+        return collect_profile_paths(&[input.to_path_buf()], true)?
+            .into_iter()
+            .map(|path| {
+                let label = path.display().to_string();
+                cli_surfaces::load_profile(&path).map(|profile| (label, profile))
+            })
+            .collect();
+    }
+
+    let text = fs::read_to_string(input)?;
+    let value: Value = serde_json::from_str(&text)?;
+    if value.get("bundle_schema").and_then(Value::as_str) == Some(PROFILE_BUNDLE_SCHEMA) {
+        let profiles = value["profiles"].as_array().cloned().unwrap_or_default();
+        return profiles
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let profile: cli_surfaces::CliSurfaceProfile = serde_json::from_value(value)?;
+                Ok((format!("{}#{}", input.display(), index + 1), profile))
+            })
+            .collect();
+    }
+
+    Ok(vec![(
+        input.display().to_string(),
+        cli_surfaces::load_profile(input)?,
+    )])
+}
+
+fn known_good_value(input: &Path, command: &str) -> Result<Value> {
+    let mut candidates = load_profiles_from_intelligence_input(input)?
+        .into_iter()
+        .filter(|(_, profile)| profile.command == command)
+        .map(|(source, profile)| {
+            let quality = profile.quality_report();
+            let freshness = profile_freshness_value(&profile);
+            let freshness_bonus = if freshness["stale"].as_bool() == Some(false) {
+                15i64
+            } else if freshness["known"].as_bool() == Some(true) {
+                0
+            } else {
+                5
+            };
+            let provenance_bonus =
+                if profile.provenance.generator_version == env!("CARGO_PKG_VERSION") {
+                    5i64
+                } else {
+                    0
+                };
+            let rank_score = quality.score as i64 + freshness_bonus + provenance_bonus;
+            json!({
+                "source": source,
+                "command": profile.command,
+                "summary": profile.summary,
+                "quality": {
+                    "score": quality.score,
+                    "level": quality.level,
+                    "ready_for_agent_docs": quality.ready_for_agent_docs,
+                },
+                "freshness": freshness,
+                "provenance": profile.provenance,
+                "rank_score": rank_score,
+                "profile": cli_surfaces::profile_value(&profile),
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        b["rank_score"]
+            .as_i64()
+            .unwrap_or(0)
+            .cmp(&a["rank_score"].as_i64().unwrap_or(0))
+    });
+    if candidates.is_empty() {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "No saved profiles for '{}' were found in '{}'.",
+            command,
+            input.display()
+        )));
+    }
+    Ok(json!({
+        "command": command,
+        "candidate_count": candidates.len(),
+        "selected": candidates.first().cloned().unwrap_or(Value::Null),
+        "alternatives": candidates.into_iter().skip(1).collect::<Vec<_>>(),
+    }))
+}
+
+fn bundle_profile_quality_summary(bundle_value: &Value) -> Value {
+    let profiles = bundle_value["profiles"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut count = 0u64;
+    let mut ready = 0u64;
+    let mut stale = 0u64;
+    let mut total_quality = 0u64;
+    for value in profiles {
+        if let Ok(profile) = serde_json::from_value::<cli_surfaces::CliSurfaceProfile>(value) {
+            count += 1;
+            let quality = profile.quality_report();
+            total_quality += quality.score as u64;
+            if quality.ready_for_agent_docs {
+                ready += 1;
+            }
+            if profile_freshness_value(&profile)["stale"].as_bool() == Some(true) {
+                stale += 1;
+            }
+        }
+    }
+    json!({
+        "profile_count": count,
+        "ready_count": ready,
+        "stale_count": stale,
+        "average_quality_score": if count == 0 { 0.0 } else { total_quality as f64 / count as f64 },
+    })
+}
+
+fn trust_report_value(
+    input: &str,
+    bundle_value: &Value,
+    sha256: String,
+    signature: Value,
+    expected_sha256: Option<&str>,
+) -> Value {
+    json!({
+        "bundle_schema": PROFILE_BUNDLE_SCHEMA,
+        "input": input,
+        "verified": true,
+        "sha256": sha256,
+        "expected_sha256": expected_sha256,
+        "signature": signature,
+        "metadata": bundle_value.get("metadata").cloned().unwrap_or(Value::Null),
+        "generated_by": bundle_value.get("generated_by").cloned().unwrap_or(Value::Null),
+        "generator_version": bundle_value.get("generator_version").cloned().unwrap_or(Value::Null),
+        "generated_at": bundle_value.get("generated_at").cloned().unwrap_or(Value::Null),
+        "quality": bundle_profile_quality_summary(bundle_value),
+    })
+}
+
+fn registry_index_path(dir: &Path) -> PathBuf {
+    dir.join("index.json")
+}
+
+fn load_registry_value(dir: &Path) -> Result<Value> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(registry_index_path(dir))?)?;
+    let schema = value["registry_schema"].as_str().unwrap_or_default();
+    if schema != PROFILE_REGISTRY_SCHEMA {
+        return Err(sxmc::error::SxmcError::Other(format!(
+            "Registry '{}' is not a valid sxmc registry. Expected `registry_schema: {}`.",
+            dir.display(),
+            PROFILE_REGISTRY_SCHEMA
+        )));
+    }
+    Ok(value)
+}
+
+fn registry_init_value(dir: &Path) -> Result<Value> {
+    fs::create_dir_all(dir.join("bundles"))?;
+    let path = registry_index_path(dir);
+    let value = json!({
+        "registry_schema": PROFILE_REGISTRY_SCHEMA,
+        "generated_by": "sxmc",
+        "generator_version": env!("CARGO_PKG_VERSION"),
+        "generated_at": Utc::now().to_rfc3339(),
+        "entries": [],
+    });
+    fs::write(&path, serde_json::to_string_pretty(&value)?)?;
+    Ok(json!({
+        "registry_schema": PROFILE_REGISTRY_SCHEMA,
+        "path": dir.display().to_string(),
+        "index": path.display().to_string(),
+        "initialized": true,
+    }))
+}
+
+fn registry_add_bundle_value(
+    dir: &Path,
+    source: &str,
+    bundle_value: &Value,
+    sha256: &str,
+) -> Result<Value> {
+    let mut registry = if registry_index_path(dir).exists() {
+        load_registry_value(dir)?
+    } else {
+        registry_init_value(dir)?;
+        load_registry_value(dir)?
+    };
+    fs::create_dir_all(dir.join("bundles"))?;
+    let metadata = bundle_value.get("metadata").cloned().unwrap_or(Value::Null);
+    let name = metadata
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            bundle_value["entries"]
+                .as_array()
+                .and_then(|items| items.first())
+                .and_then(|item| item["command"].as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "bundle".to_string());
+    let slug = bundle_slug(&name);
+    let bundle_path = dir
+        .join("bundles")
+        .join(format!("{slug}-{}.json", &sha256[..12]));
+    fs::write(&bundle_path, serde_json::to_string_pretty(bundle_value)?)?;
+    let entry = json!({
+        "name": name,
+        "slug": slug,
+        "source": source,
+        "path": bundle_path.display().to_string(),
+        "sha256": sha256,
+        "profile_count": bundle_value["profile_count"],
+        "metadata": metadata,
+        "signature": bundle_signature_report(bundle_value),
+        "published_at": Utc::now().to_rfc3339(),
+    });
+    if let Some(entries) = registry.get_mut("entries").and_then(Value::as_array_mut) {
+        entries.push(entry.clone());
+    }
+    fs::write(
+        registry_index_path(dir),
+        serde_json::to_string_pretty(&registry)?,
+    )?;
+    Ok(json!({
+        "registry_schema": PROFILE_REGISTRY_SCHEMA,
+        "registry": dir.display().to_string(),
+        "entry": entry,
+    }))
+}
+
+fn registry_pull_value(
+    dir: &Path,
+    name: &str,
+    output_dir: &Path,
+    mode: BundleImportMode,
+) -> Result<Value> {
+    let registry = load_registry_value(dir)?;
+    let mut matches = registry["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| {
+            entry["name"].as_str() == Some(name) || entry["slug"].as_str() == Some(name)
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|a, b| b["published_at"].as_str().cmp(&a["published_at"].as_str()));
+    let selected = matches.first().cloned().ok_or_else(|| {
+        sxmc::error::SxmcError::Other(format!(
+            "Registry '{}' does not contain a bundle named '{}'.",
+            dir.display(),
+            name
+        ))
+    })?;
+    let bundle_path = PathBuf::from(selected["path"].as_str().unwrap_or_default());
+    let imported = import_profile_bundle_value(&bundle_path, output_dir, mode)?;
+    Ok(json!({
+        "registry_schema": PROFILE_REGISTRY_SCHEMA,
+        "name": name,
+        "registry": dir.display().to_string(),
+        "selected": selected,
+        "import": imported,
+    }))
 }
 
 fn host_capability_map(
@@ -3766,6 +4230,7 @@ async fn main() -> Result<()> {
             working_dir,
             max_stdout_bytes,
             max_stderr_bytes,
+            execution_history_limit,
             allow_tools,
             deny_tools,
             allow_options,
@@ -3797,6 +4262,7 @@ async fn main() -> Result<()> {
                     working_dir: working_dir.map(|path| path.display().to_string()),
                     max_stdout_bytes,
                     max_stderr_bytes,
+                    execution_history_limit,
                     allow_tools,
                     deny_tools,
                     allow_options,
@@ -4676,11 +5142,19 @@ async fn main() -> Result<()> {
                 hosts,
                 output,
                 signature_secret,
+                signing_key,
                 pretty,
                 format,
             } => {
                 let root = resolve_generation_root(root)?;
                 let signature_secret = parse_optional_secret(signature_secret)?;
+                let signing_key = signing_key.map(|path| {
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        root.join(path)
+                    }
+                });
                 let use_default_recursive = inputs.is_empty();
                 let profile_inputs = if use_default_recursive {
                     vec![default_saved_profiles_dir(&root)]
@@ -4707,6 +5181,7 @@ async fn main() -> Result<()> {
                         &hosts,
                     )?,
                     signature_secret.as_deref(),
+                    signing_key.as_deref(),
                 )?;
                 let output_path = if output.is_absolute() {
                     output
@@ -4778,17 +5253,23 @@ async fn main() -> Result<()> {
                 timeout_seconds,
                 expected_sha256,
                 signature_secret,
+                public_key,
                 pretty,
                 format,
             } => {
                 let headers = parse_headers(&auth_headers)?;
                 let signature_secret = parse_optional_secret(signature_secret)?;
+                let public_key = public_key.as_deref();
                 let bundle_value =
                     read_bundle_source(&input, &headers, parse_timeout(timeout_seconds)).await?;
                 let sha256 =
                     verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &input)?;
-                let signature =
-                    verify_bundle_signature(&bundle_value, signature_secret.as_deref(), &input)?;
+                let signature = verify_bundle_signature(
+                    &bundle_value,
+                    signature_secret.as_deref(),
+                    public_key,
+                    &input,
+                )?;
                 let report = json!({
                     "bundle_schema": PROFILE_BUNDLE_SCHEMA,
                     "input": input,
@@ -4806,6 +5287,21 @@ async fn main() -> Result<()> {
                         "Verified bundle {} ({} profiles)",
                         report["input"].as_str().unwrap_or("<unknown>"),
                         report["profile_count"].as_u64().unwrap_or(0)
+                    );
+                }
+            }
+            InspectAction::BundleKeygen {
+                output_dir,
+                pretty,
+                format,
+            } => {
+                let value = generate_bundle_keypair_value(&output_dir)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Generated Ed25519 bundle signing keys in {}",
+                        output_dir.display()
                     );
                 }
             }
@@ -4904,6 +5400,150 @@ async fn main() -> Result<()> {
                     println!("{}", output::format_structured_value(&query, format));
                 } else {
                     print_corpus_query_report(&query);
+                }
+            }
+            InspectAction::KnownGood {
+                input,
+                command,
+                pretty,
+                format,
+            } => {
+                let value = known_good_value(&input, &command)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Selected known-good profile for {} from {}",
+                        command,
+                        value["selected"]["source"].as_str().unwrap_or("<unknown>")
+                    );
+                }
+            }
+            InspectAction::TrustReport {
+                input,
+                auth_headers,
+                timeout_seconds,
+                expected_sha256,
+                signature_secret,
+                public_key,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let signature_secret = parse_optional_secret(signature_secret)?;
+                let bundle_value =
+                    read_bundle_source(&input, &headers, parse_timeout(timeout_seconds)).await?;
+                let sha256 =
+                    verify_bundle_digest(&bundle_value, expected_sha256.as_deref(), &input)?;
+                let signature = verify_bundle_signature(
+                    &bundle_value,
+                    signature_secret.as_deref(),
+                    public_key.as_deref(),
+                    &input,
+                )?;
+                let report = trust_report_value(
+                    &input,
+                    &bundle_value,
+                    sha256,
+                    signature,
+                    expected_sha256.as_deref(),
+                );
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&report, format));
+                } else {
+                    println!(
+                        "Trust report for {}: {} profiles, avg quality {:.1}",
+                        report["input"].as_str().unwrap_or("<unknown>"),
+                        report["quality"]["profile_count"].as_u64().unwrap_or(0),
+                        report["quality"]["average_quality_score"]
+                            .as_f64()
+                            .unwrap_or(0.0)
+                    );
+                }
+            }
+            InspectAction::RegistryInit {
+                dir,
+                pretty,
+                format,
+            } => {
+                let value = registry_init_value(&dir)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!("Initialized local registry at {}", dir.display());
+                }
+            }
+            InspectAction::RegistryAdd {
+                bundle,
+                registry,
+                auth_headers,
+                timeout_seconds,
+                pretty,
+                format,
+            } => {
+                let headers = parse_headers(&auth_headers)?;
+                let bundle_value =
+                    read_bundle_source(&bundle, &headers, parse_timeout(timeout_seconds)).await?;
+                let sha256 = bundle_sha256_from_value(&bundle_value)?;
+                let value = registry_add_bundle_value(&registry, &bundle, &bundle_value, &sha256)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!("Added bundle {} to registry {}", bundle, registry.display());
+                }
+            }
+            InspectAction::RegistryList {
+                registry,
+                pretty,
+                format,
+            } => {
+                let value = load_registry_value(&registry)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Registry {} has {} bundle entries",
+                        registry.display(),
+                        value["entries"]
+                            .as_array()
+                            .map(|items| items.len())
+                            .unwrap_or(0)
+                    );
+                }
+            }
+            InspectAction::RegistryPull {
+                name,
+                registry,
+                root,
+                output_dir,
+                overwrite,
+                skip_existing,
+                pretty,
+                format,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let output_dir = output_dir.unwrap_or_else(|| default_saved_profiles_dir(&root));
+                let output_dir = if output_dir.is_absolute() {
+                    output_dir
+                } else {
+                    root.join(output_dir)
+                };
+                let mode = if overwrite {
+                    BundleImportMode::Overwrite
+                } else if skip_existing {
+                    BundleImportMode::SkipExisting
+                } else {
+                    BundleImportMode::Unique
+                };
+                let value = registry_pull_value(&registry, &name, &output_dir, mode)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    println!(
+                        "Pulled registry bundle {} into {}",
+                        name,
+                        output_dir.display()
+                    );
                 }
             }
             InspectAction::CacheStats { pretty, format } => {
@@ -5009,11 +5649,19 @@ async fn main() -> Result<()> {
             auth_headers,
             timeout_seconds,
             signature_secret,
+            signing_key,
             pretty,
             format,
         } => {
             let root = resolve_generation_root(root)?;
             let signature_secret = parse_optional_secret(signature_secret)?;
+            let signing_key = signing_key.map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    root.join(path)
+                }
+            });
             let use_default_recursive = inputs.is_empty();
             let profile_inputs = if use_default_recursive {
                 vec![default_saved_profiles_dir(&root)]
@@ -5040,6 +5688,7 @@ async fn main() -> Result<()> {
                     &hosts,
                 )?,
                 signature_secret.as_deref(),
+                signing_key.as_deref(),
             )?;
             let resolved_target = if is_http_target(&target) || target.starts_with("file://") {
                 target.clone()
@@ -5087,6 +5736,7 @@ async fn main() -> Result<()> {
             timeout_seconds,
             expected_sha256,
             signature_secret,
+            public_key,
             pretty,
             format,
         } => {
@@ -5119,6 +5769,7 @@ async fn main() -> Result<()> {
             let signature = verify_bundle_signature(
                 &bundle_value,
                 signature_secret.as_deref(),
+                public_key.as_deref(),
                 &resolved_source,
             )?;
             let value = import_profile_bundle_from_value(

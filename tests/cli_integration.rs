@@ -105,6 +105,50 @@ fn spawn_http_server(extra_args: &[&str]) -> (Child, u16) {
     (child, port)
 }
 
+fn spawn_wrap_http_server(command_spec: &str, extra_args: &[&str]) -> (Child, u16) {
+    let mut child = ProcessCommand::new(sxmc_bin_string())
+        .args([
+            "wrap",
+            command_spec,
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ])
+        .args(extra_args)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let stderr = child.stderr.take().expect("child stderr should be piped");
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut sent = false;
+        for line in reader.lines().map_while(Result::ok) {
+            if !sent {
+                if let Some(port) = line
+                    .split("http://127.0.0.1:")
+                    .nth(1)
+                    .and_then(|tail| tail.split("/mcp").next())
+                    .and_then(|port| port.parse::<u16>().ok())
+                {
+                    let _ = sender.send(port);
+                    sent = true;
+                }
+            }
+        }
+    });
+
+    let port = receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("timed out waiting for wrapped HTTP server port");
+    wait_for_http_server(port);
+    (child, port)
+}
+
 fn command_stdout(args: &[&str]) -> String {
     let output = ProcessCommand::new(sxmc_bin_string())
         .args(args)
@@ -565,6 +609,51 @@ fn test_wrap_reports_progress_events_and_structured_timeout_errors() {
                 .unwrap_or_default()
                 .contains("still running")
         }));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_wrap_http_exposes_execution_resources() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_wrappable_cli(temp.path());
+    let (mut child, port) = spawn_wrap_http_server(
+        fake.to_string_lossy().as_ref(),
+        &["--allow-tool", "hello", "--execution-history-limit", "5"],
+    );
+    let url = format!("http://127.0.0.1:{port}/mcp");
+
+    let output = ProcessCommand::new(sxmc_bin_string())
+        .args(["http", &url, "hello", "name=Sam", "--pretty"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let resource_uri = value["execution_resource_uri"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let history: Value = serde_json::from_str(&command_stdout(&[
+        "http",
+        &url,
+        "--resource",
+        "sxmc-wrap://executions",
+    ]))
+    .unwrap();
+    assert!(history["count"].as_u64().unwrap_or(0) >= 1);
+
+    let detail: Value = serde_json::from_str(&command_stdout(&[
+        "http",
+        &url,
+        "--resource",
+        &resource_uri,
+    ]))
+    .unwrap();
+    assert_eq!(detail["tool"], "hello");
+    assert_eq!(detail["execution_resource_uri"], resource_uri);
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]

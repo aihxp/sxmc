@@ -1280,6 +1280,45 @@ else
   fail "signed bundle flow" "${signed_pull:0:220}"
 fi
 
+key_dir="$TMPDIR_TEST/bundle-keys"
+keygen_out=$("$SXMC" inspect bundle-keygen --output-dir "$key_dir" 2>/dev/null)
+ed25519_bundle_file="$TMPDIR_TEST/ed25519.bundle.json"
+ed25519_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --bundle-name "Platform Bundle" --description "Blessed internal tool set" --role platform --hosts claude-code,cursor --signing-key "$key_dir/bundle-signing.key.json" --output "$ed25519_bundle_file" 2>/dev/null)
+ed25519_verify=$("$SXMC" inspect bundle-verify "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
+ed25519_pull_dir="$TMPDIR_TEST/ed25519-pulled-profiles"
+ed25519_pull=$("$SXMC" pull "$ed25519_bundle_file" --root "$bundle_root" --output-dir "$ed25519_pull_dir" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
+if json_check "$keygen_out" "len(d.get('fingerprint','')) == 64" && json_check "$ed25519_export" "d.get('signature',{}).get('algorithm') == 'ed25519'" && json_check "$ed25519_verify" "d.get('signature',{}).get('verified') is True" && json_check "$ed25519_pull" "d.get('signature',{}).get('verified') is True and d.get('imported_count',0) >= 1" && [ -f "$ed25519_pull_dir/git.json" ]; then
+  pass "ed25519 bundles export, verify, and pull with generated keys"
+else
+  fail "ed25519 bundle flow" "${ed25519_pull:0:220}"
+fi
+
+known_good=$("$SXMC" inspect known-good "$bundle_meta_file" --command git 2>/dev/null)
+if json_check "$known_good" "d.get('selected',{}).get('command') == 'git' and d.get('candidate_count',0) >= 1"; then
+  pass "inspect known-good selects the best matching profile"
+else
+  fail "inspect known-good" "${known_good:0:220}"
+fi
+
+trust_report=$("$SXMC" inspect trust-report "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
+if json_check "$trust_report" "d.get('verified') is True and d.get('quality',{}).get('profile_count',0) == 2"; then
+  pass "inspect trust-report summarizes bundle trust and quality"
+else
+  fail "inspect trust-report" "${trust_report:0:220}"
+fi
+
+registry_dir="$TMPDIR_TEST/profile-registry"
+registry_init=$("$SXMC" inspect registry-init "$registry_dir" 2>/dev/null)
+registry_add=$("$SXMC" inspect registry-add "$ed25519_bundle_file" --registry "$registry_dir" 2>/dev/null)
+registry_list=$("$SXMC" inspect registry-list "$registry_dir" 2>/dev/null)
+registry_pull_dir="$TMPDIR_TEST/registry-pulled-profiles"
+registry_pull=$("$SXMC" inspect registry-pull "Platform Bundle" --registry "$registry_dir" --output-dir "$registry_pull_dir" 2>/dev/null)
+if json_check "$registry_init" "d.get('initialized') is True" && json_check "$registry_add" "d.get('entry',{}).get('name') == 'Platform Bundle'" && json_check "$registry_list" "len(d.get('entries',[])) >= 1" && json_check "$registry_pull" "d.get('import',{}).get('imported_count',0) >= 1 and d.get('selected',{}).get('name') == 'Platform Bundle'" && [ -f "$registry_pull_dir/git.json" ]; then
+  pass "local registry init, add, list, and pull round-trip bundles"
+else
+  fail "local registry flow" "${registry_pull:0:220}"
+fi
+
 watch_ndjson=$(
 python3 - <<'PY' "$SXMC" "$before_profile"
 import subprocess, sys, time

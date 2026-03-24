@@ -116,6 +116,10 @@ pub enum Commands {
         #[arg(long, default_value_t = 128 * 1024)]
         max_stderr_bytes: usize,
 
+        /// Keep the most recent wrapped execution records as MCP-readable resources
+        #[arg(long, default_value_t = 25)]
+        execution_history_limit: usize,
+
         /// Only expose these generated MCP tool names
         #[arg(long = "allow-tool", value_delimiter = ',')]
         allow_tools: Vec<String>,
@@ -500,8 +504,20 @@ pub enum Commands {
         timeout_seconds: Option<u64>,
 
         /// Secret used to embed an HMAC signature into the exported bundle
-        #[arg(long = "signature-secret", value_name = "SECRET")]
+        #[arg(
+            long = "signature-secret",
+            value_name = "SECRET",
+            conflicts_with = "signing_key"
+        )]
         signature_secret: Option<String>,
+
+        /// Ed25519 signing key file used to sign the exported bundle
+        #[arg(
+            long = "signing-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        signing_key: Option<PathBuf>,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -546,8 +562,20 @@ pub enum Commands {
         expected_sha256: Option<String>,
 
         /// Secret used to verify an embedded HMAC signature on the pulled bundle
-        #[arg(long = "signature-secret", value_name = "SECRET")]
+        #[arg(
+            long = "signature-secret",
+            value_name = "SECRET",
+            conflicts_with = "public_key"
+        )]
         signature_secret: Option<String>,
+
+        /// Ed25519 public key file used to verify an embedded bundle signature
+        #[arg(
+            long = "public-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        public_key: Option<PathBuf>,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -875,7 +903,14 @@ pub enum InspectAction {
         #[arg(long)]
         output: PathBuf,
         #[arg(long = "signature-secret", value_name = "SECRET")]
+        #[arg(conflicts_with = "signing_key")]
         signature_secret: Option<String>,
+        #[arg(
+            long = "signing-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        signing_key: Option<PathBuf>,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]
@@ -905,7 +940,22 @@ pub enum InspectAction {
         #[arg(long = "expected-sha256", value_name = "HEX")]
         expected_sha256: Option<String>,
         #[arg(long = "signature-secret", value_name = "SECRET")]
+        #[arg(conflicts_with = "public_key")]
         signature_secret: Option<String>,
+        #[arg(
+            long = "public-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        public_key: Option<PathBuf>,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    BundleKeygen {
+        #[arg(long, default_value = ".sxmc/keys")]
+        output_dir: PathBuf,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]
@@ -939,6 +989,84 @@ pub enum InspectAction {
         search: Option<String>,
         #[arg(long, default_value_t = 20)]
         limit: usize,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    KnownGood {
+        input: PathBuf,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    TrustReport {
+        input: String,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+        #[arg(long = "expected-sha256", value_name = "HEX")]
+        expected_sha256: Option<String>,
+        #[arg(
+            long = "signature-secret",
+            value_name = "SECRET",
+            conflicts_with = "public_key"
+        )]
+        signature_secret: Option<String>,
+        #[arg(
+            long = "public-key",
+            value_name = "PATH",
+            conflicts_with = "signature_secret"
+        )]
+        public_key: Option<PathBuf>,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistryInit {
+        dir: PathBuf,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistryAdd {
+        bundle: String,
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+        #[arg(long = "timeout-seconds", value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistryList {
+        registry: PathBuf,
+        #[arg(long)]
+        pretty: bool,
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+    RegistryPull {
+        name: String,
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long, conflicts_with = "skip_existing")]
+        overwrite: bool,
+        #[arg(long, conflicts_with = "overwrite")]
+        skip_existing: bool,
         #[arg(long)]
         pretty: bool,
         #[arg(long, value_enum)]

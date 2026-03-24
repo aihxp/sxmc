@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,9 +12,10 @@ use axum::{
     Json, Router,
 };
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
-    JsonObject, ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResult, ServerCapabilities, ServerInfo, Tool,
+    Annotated, CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams,
+    GetPromptResult, JsonObject, ListPromptsResult, ListResourcesResult, ListToolsResult,
+    PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult,
+    ResourceContents, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::{
@@ -47,6 +48,9 @@ pub struct WrappedCliServer {
     summary: String,
     option_policy: WrappedFilterPolicy,
     positional_policy: WrappedFilterPolicy,
+    execution_history_limit: usize,
+    execution_records: Arc<Mutex<VecDeque<Value>>>,
+    next_execution_id: Arc<AtomicU64>,
     tools: Vec<WrappedCliTool>,
     tool_index: HashMap<String, usize>,
 }
@@ -64,6 +68,7 @@ pub struct WrappedCliOptions {
     pub deny_options: Vec<String>,
     pub allow_positionals: Vec<String>,
     pub deny_positionals: Vec<String>,
+    pub execution_history_limit: usize,
 }
 
 #[derive(Clone, Default)]
@@ -154,6 +159,9 @@ pub fn build_wrapped_cli_server(
         summary: profile.summary.clone(),
         option_policy: argument_policies.options,
         positional_policy: argument_policies.positionals,
+        execution_history_limit: options.execution_history_limit.max(1),
+        execution_records: Arc::new(Mutex::new(VecDeque::new())),
+        next_execution_id: Arc::new(AtomicU64::new(1)),
         tools,
         tool_index,
     })
@@ -170,6 +178,15 @@ impl WrappedCliServer {
 
     pub fn working_dir(&self) -> Option<&str> {
         self.working_dir.as_deref()
+    }
+
+    fn store_execution_record(&self, record: Value) {
+        if let Ok(mut records) = self.execution_records.lock() {
+            records.push_back(record);
+            while records.len() > self.execution_history_limit {
+                records.pop_front();
+            }
+        }
     }
 }
 
@@ -214,6 +231,7 @@ impl ServerHandler for WrappedCliServer {
             .ok_or_else(|| {
                 McpError::invalid_params(format!("Unknown tool: {}", tool_name), None)
             })?;
+        let execution_id = self.next_execution_id.fetch_add(1, Ordering::Relaxed);
 
         let mut args = self.fixed_args.clone();
         args.extend(tool.build_cli_args(request.arguments.as_ref())?);
@@ -282,6 +300,8 @@ impl ServerHandler for WrappedCliServer {
                 let machine_friendly_stdout = stdout_json.is_some();
                 let stderr_nonempty = !stderr.trim().is_empty();
                 let payload = json!({
+                    "execution_id": execution_id,
+                    "execution_resource_uri": format!("sxmc-wrap://executions/{}", execution_id),
                     "wrapped_command": self.wrapped_command,
                     "tool": tool.name,
                     "summary": self.summary,
@@ -306,6 +326,7 @@ impl ServerHandler for WrappedCliServer {
                     "elapsed_ms": elapsed_ms,
                     "timeout_seconds": self.timeout_secs,
                 });
+                self.store_execution_record(payload.clone());
                 let text = serde_json::to_string_pretty(&payload)
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                 if result.exit_code == 0 {
@@ -317,6 +338,8 @@ impl ServerHandler for WrappedCliServer {
             Err(error) => {
                 let timeout = matches!(error, SxmcError::TimeoutError(_));
                 let payload = json!({
+                    "execution_id": execution_id,
+                    "execution_resource_uri": format!("sxmc-wrap://executions/{}", execution_id),
                     "wrapped_command": self.wrapped_command,
                     "tool": tool.name,
                     "summary": self.summary,
@@ -333,6 +356,7 @@ impl ServerHandler for WrappedCliServer {
                     "timeout": timeout,
                     "error": error.to_string(),
                 });
+                self.store_execution_record(payload.clone());
                 let text = serde_json::to_string_pretty(&payload)
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                 Ok(CallToolResult::error(vec![Content::text(text)]))
@@ -371,8 +395,33 @@ impl ServerHandler for WrappedCliServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourcesResult, McpError> {
+        let mut resources = Vec::new();
+        resources.push(Annotated::new(
+            RawResource::new(
+                "sxmc-wrap://executions".to_string(),
+                "Wrapped execution history".to_string(),
+            )
+            .with_description("Recent wrapped CLI execution summaries.")
+            .with_mime_type("application/json"),
+            None,
+        ));
+        if let Ok(records) = self.execution_records.lock() {
+            for record in records.iter().rev() {
+                let id = record["execution_id"].as_u64().unwrap_or(0);
+                let tool = record["tool"].as_str().unwrap_or("wrapped-tool");
+                resources.push(Annotated::new(
+                    RawResource::new(
+                        format!("sxmc-wrap://executions/{id}"),
+                        format!("Wrapped execution {id} ({tool})"),
+                    )
+                    .with_description("Detailed wrapped CLI execution payload.")
+                    .with_mime_type("application/json"),
+                    None,
+                ));
+            }
+        }
         Ok(ListResourcesResult {
-            resources: Vec::new(),
+            resources,
             next_cursor: None,
             meta: None,
         })
@@ -383,11 +432,69 @@ impl ServerHandler for WrappedCliServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ReadResourceResult, McpError> {
+        let uri = request.uri.as_str();
+        if uri == "sxmc-wrap://executions" {
+            let entries = self
+                .execution_records
+                .lock()
+                .map(|records| {
+                    records
+                        .iter()
+                        .map(|record| {
+                            json!({
+                                "execution_id": record["execution_id"],
+                                "tool": record["tool"],
+                                "summary": record["summary"],
+                                "elapsed_ms": record["elapsed_ms"],
+                                "timeout": record["timeout"],
+                                "exit_code": record["exit_code"],
+                                "long_running": record["long_running"],
+                                "resource_uri": record["execution_resource_uri"],
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                serde_json::to_string_pretty(&json!({
+                    "count": entries.len(),
+                    "entries": entries,
+                }))
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                uri,
+            )]));
+        }
+        if let Some(id_text) = uri.strip_prefix("sxmc-wrap://executions/") {
+            let id = id_text.parse::<u64>().map_err(|_| {
+                McpError::invalid_params(
+                    format!("Invalid wrapped execution resource: {}", uri),
+                    None,
+                )
+            })?;
+            let payload = self
+                .execution_records
+                .lock()
+                .ok()
+                .and_then(|records| {
+                    records
+                        .iter()
+                        .find(|record| record["execution_id"].as_u64() == Some(id))
+                        .cloned()
+                })
+                .ok_or_else(|| {
+                    McpError::invalid_params(
+                        format!("Unknown wrapped execution resource: {}", uri),
+                        None,
+                    )
+                })?;
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                serde_json::to_string_pretty(&payload)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+                uri,
+            )]));
+        }
         Err(McpError::invalid_params(
-            format!(
-                "Wrapped CLI servers do not expose resources: {}",
-                request.uri
-            ),
+            format!("Unknown resource: {}", uri),
             None,
         ))
     }
@@ -538,6 +645,7 @@ fn build_wrapped_http_router(
             "progress_seconds": server.progress_secs,
             "max_stdout_bytes": server.max_stdout_bytes,
             "max_stderr_bytes": server.max_stderr_bytes,
+            "execution_history_limit": server.execution_history_limit,
             "option_policy": {
                 "allow": server.option_policy.rendered_allow(),
                 "deny": server.option_policy.rendered_deny(),
