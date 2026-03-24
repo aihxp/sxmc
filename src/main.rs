@@ -2213,8 +2213,8 @@ fn corpus_query_value(
 
 fn generate_bundle_keypair_value(output_dir: &Path) -> Result<Value> {
     fs::create_dir_all(output_dir)?;
-    let private_path = output_dir.join("bundle-signing.key.json");
-    let public_path = output_dir.join("bundle-signing.pub.json");
+    let private_path = output_dir.join("bundle-signing.ed25519.key.json");
+    let public_path = output_dir.join("bundle-signing.ed25519.pub.json");
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
     let private_value = json!({
@@ -4897,11 +4897,22 @@ async fn main() -> Result<()> {
                 cmd_skills_info(&resolve_paths(paths), &name)?;
             }
             SkillsAction::Run {
+                paths,
+                script,
+                env_vars,
+                print_body,
                 name,
                 arguments,
-                paths,
             } => {
-                cmd_skills_run(&resolve_paths(paths), &name, &arguments).await?;
+                cmd_skills_run(
+                    &resolve_paths(paths),
+                    &name,
+                    script.as_deref(),
+                    &env_vars,
+                    print_body,
+                    &arguments,
+                )
+                .await?;
             }
             SkillsAction::Create {
                 source,

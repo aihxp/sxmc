@@ -1251,7 +1251,7 @@ else
 fi
 
 corpus_query=$("$SXMC" inspect corpus-query "$corpus_file" --command git 2>/dev/null)
-if json_check "$corpus_query" "d.get('match_count',0) >= 1 and d.get('entries',[{}])[0].get('command') == 'git'"; then
+if json_check "$corpus_query" "d.get('query',{}).get('command') == 'git' and d.get('match_count',0) >= 1 and d.get('entries',[{}])[0].get('command') == 'git' and d.get('entries',[{}])[0].get('quality',{}).get('score',0) > 0"; then
   pass "inspect corpus-query filters exported corpora"
 else
   fail "inspect corpus-query" "${corpus_query:0:220}"
@@ -1282,33 +1282,35 @@ fi
 
 key_dir="$TMPDIR_TEST/bundle-keys"
 keygen_out=$("$SXMC" inspect bundle-keygen --output-dir "$key_dir" 2>/dev/null)
+ed25519_private_key=$(json_field "$keygen_out" "d.get('private_key','')")
+ed25519_public_key=$(json_field "$keygen_out" "d.get('public_key','')")
 ed25519_bundle_file="$TMPDIR_TEST/ed25519.bundle.json"
-ed25519_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --bundle-name "Platform Bundle" --description "Blessed internal tool set" --role platform --hosts claude-code,cursor --signing-key "$key_dir/bundle-signing.key.json" --output "$ed25519_bundle_file" 2>/dev/null)
-ed25519_verify=$("$SXMC" inspect bundle-verify "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
+ed25519_export=$("$SXMC" inspect bundle-export --root "$bundle_root" --bundle-name "Platform Bundle" --description "Blessed internal tool set" --role platform --hosts claude-code,cursor --signing-key "$ed25519_private_key" --output "$ed25519_bundle_file" 2>/dev/null)
+ed25519_verify=$("$SXMC" inspect bundle-verify "$ed25519_bundle_file" --public-key "$ed25519_public_key" 2>/dev/null)
 ed25519_pull_dir="$TMPDIR_TEST/ed25519-pulled-profiles"
-ed25519_pull=$("$SXMC" pull "$ed25519_bundle_file" --root "$bundle_root" --output-dir "$ed25519_pull_dir" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
-if json_check "$keygen_out" "len(d.get('fingerprint','')) == 64" && json_check "$ed25519_export" "d.get('signature',{}).get('algorithm') == 'ed25519'" && json_check "$ed25519_verify" "d.get('signature',{}).get('verified') is True" && json_check "$ed25519_pull" "d.get('signature',{}).get('verified') is True and d.get('imported_count',0) >= 1" && [ -f "$ed25519_pull_dir/git.json" ]; then
+ed25519_pull=$("$SXMC" pull "$ed25519_bundle_file" --root "$bundle_root" --output-dir "$ed25519_pull_dir" --public-key "$ed25519_public_key" 2>/dev/null)
+if json_check "$keygen_out" "len(d.get('fingerprint','')) == 64 and d.get('private_key','').endswith('bundle-signing.ed25519.key.json') and d.get('public_key','').endswith('bundle-signing.ed25519.pub.json')" && json_check "$ed25519_export" "d.get('signature',{}).get('algorithm') == 'ed25519'" && json_check "$ed25519_verify" "d.get('signature',{}).get('verified') is True" && json_check "$ed25519_pull" "d.get('signature',{}).get('verified') is True and d.get('imported_count',0) >= 1" && [ -f "$ed25519_pull_dir/git.json" ]; then
   pass "ed25519 bundles export, verify, and pull with generated keys"
 else
   fail "ed25519 bundle flow" "${ed25519_pull:0:220}"
 fi
 
 known_good=$("$SXMC" inspect known-good "$bundle_meta_file" --command git 2>/dev/null)
-if json_check "$known_good" "d.get('selected',{}).get('command') == 'git' and d.get('candidate_count',0) >= 1"; then
+if json_check "$known_good" "d.get('selected',{}).get('command') == 'git' and d.get('selected',{}).get('rank_score',0) > 0 and d.get('selected',{}).get('quality',{}).get('ready_for_agent_docs') is True and d.get('candidate_count',0) >= 1"; then
   pass "inspect known-good selects the best matching profile"
 else
   fail "inspect known-good" "${known_good:0:220}"
 fi
 
-trust_report=$("$SXMC" inspect trust-report "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" 2>/dev/null)
+trust_report=$("$SXMC" inspect trust-report "$ed25519_bundle_file" --public-key "$ed25519_public_key" 2>/dev/null)
 if json_check "$trust_report" "d.get('verified') is True and d.get('quality',{}).get('profile_count',0) == 2"; then
   pass "inspect trust-report summarizes bundle trust and quality"
 else
   fail "inspect trust-report" "${trust_report:0:220}"
 fi
 
-trust_policy=$("$SXMC" inspect trust-policy "$ed25519_bundle_file" --public-key "$key_dir/bundle-signing.pub.json" --require-signature --require-verified-signature --min-average-quality 1 --min-ready-count 1 --max-stale-count 10 --require-role platform --require-host claude_code,cursor 2>/dev/null)
-if json_check "$trust_policy" "d.get('passed') is True and len(d.get('checks',[])) >= 5"; then
+trust_policy=$("$SXMC" inspect trust-policy "$ed25519_bundle_file" --public-key "$ed25519_public_key" --require-signature --require-verified-signature --min-average-quality 1 --min-ready-count 1 --max-stale-count 10 --require-role platform --require-host claude_code,cursor 2>/dev/null)
+if json_check "$trust_policy" "d.get('passed') is True and len(d.get('checks',[])) >= 5 and any(item.get('name') == 'require_hosts' for item in d.get('checks',[])) and d.get('report',{}).get('metadata',{}).get('role') == 'platform'"; then
   pass "inspect trust-policy enforces signature, quality, and metadata gates"
 else
   fail "inspect trust-policy" "${trust_policy:0:220}"
@@ -1346,6 +1348,68 @@ if echo "$registry_push_help" | grep -q "registry" && echo "$registry_push_help"
   pass "inspect registry-push exposes remote registry upload options"
 else
   fail "inspect registry-push --help" "${registry_push_help:0:220}"
+fi
+
+remote_registry_flow=$(
+python3 - <<'PY' "$SXMC" "$ed25519_bundle_file" "$TMPDIR_TEST"
+import json, os, subprocess, sys, time
+sxmc, bundle, tmpdir = sys.argv[1], sys.argv[2], sys.argv[3]
+registry_dir = os.path.join(tmpdir, "served-registry-e2e")
+synced_dir = os.path.join(tmpdir, "synced-registry-e2e")
+pull_dir = os.path.join(tmpdir, "pulled-registry-e2e")
+proc = subprocess.Popen(
+    [sxmc, "inspect", "registry-serve", "--registry", registry_dir, "--host", "127.0.0.1", "--port", "0"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.PIPE,
+    text=True,
+)
+port = None
+try:
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        line = proc.stderr.readline()
+        if not line:
+            time.sleep(0.05)
+            continue
+        marker = "http://127.0.0.1:"
+        if marker in line and "/index.json" in line:
+            port = line.split(marker, 1)[1].split("/index.json", 1)[0].strip()
+            break
+    if not port:
+        raise SystemExit(json.dumps({"ok": False, "error": "no-port"}))
+    base = f"http://127.0.0.1:{port}"
+    push = subprocess.run(
+        [sxmc, "inspect", "registry-push", bundle, "--registry", base, "--pretty"],
+        capture_output=True, text=True, check=True,
+    )
+    sync = subprocess.run(
+        [sxmc, "inspect", "registry-sync", f"{base}/index.json", "--registry", synced_dir, "--pretty"],
+        capture_output=True, text=True, check=True,
+    )
+    pull = subprocess.run(
+        [sxmc, "inspect", "registry-pull", "Platform Bundle", "--registry", synced_dir, "--output-dir", pull_dir, "--pretty"],
+        capture_output=True, text=True, check=True,
+    )
+    print(json.dumps({
+        "ok": True,
+        "push": json.loads(push.stdout),
+        "sync": json.loads(sync.stdout),
+        "pull": json.loads(pull.stdout),
+        "git_exists": os.path.exists(os.path.join(pull_dir, "git.json")),
+    }))
+finally:
+    proc.terminate()
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+PY
+)
+if json_check "$remote_registry_flow" "d.get('ok') is True and d.get('push',{}).get('transport') == 'http' and d.get('sync',{}).get('imported_count',0) >= 1 and d.get('pull',{}).get('import',{}).get('imported_count',0) >= 1 and d.get('git_exists') is True"; then
+  pass "remote registry serve, push, sync, and pull work end-to-end"
+else
+  fail "remote registry e2e" "${remote_registry_flow:0:220}"
 fi
 
 watch_ndjson=$(
@@ -1482,6 +1546,20 @@ if [ -d "$FIXTURES" ]; then
     pass "skills list --json returns valid JSON array"
   else
     fail "skills list --json" "${skills_json:0:100}"
+  fi
+
+  skills_run_out=$("$SXMC" skills run skill-with-scripts --paths "$FIXTURES" -- alpha beta 2>&1)
+  if echo "$skills_run_out" | grep -q "Hello from script! Args: alpha beta"; then
+    pass "skills run executes single script fixture with forwarded args"
+  else
+    fail "skills run should execute script-backed fixture" "${skills_run_out:0:160}"
+  fi
+
+  skills_body_out=$("$SXMC" skills run skill-with-scripts --paths "$FIXTURES" --print-body 2>&1)
+  if echo "$skills_body_out" | grep -q "This skill has tools available."; then
+    pass "skills run --print-body preserves rendered body output"
+  else
+    fail "skills run --print-body should print the skill body" "${skills_body_out:0:160}"
   fi
 else
   skip "skills list" "fixtures not found"

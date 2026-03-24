@@ -1431,11 +1431,17 @@ pub enum SkillsAction {
         paths: Option<Vec<PathBuf>>,
     },
     Run {
+        #[arg(long, value_delimiter = ',')]
+        paths: Option<Vec<PathBuf>>,
+        #[arg(long)]
+        script: Option<String>,
+        #[arg(long = "env", value_name = "KEY=VALUE")]
+        env_vars: Vec<String>,
+        #[arg(long)]
+        print_body: bool,
         name: String,
         #[arg(trailing_var_arg = true)]
         arguments: Vec<String>,
-        #[arg(long, value_delimiter = ',')]
-        paths: Option<Vec<PathBuf>>,
     },
     Create {
         source: String,

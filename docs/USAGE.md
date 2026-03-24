@@ -53,6 +53,33 @@ sxmc serve --transport http --host 0.0.0.0 --port 8000 \
   --paths /absolute/path/to/skills
 ```
 
+## Manage And Run Skills
+
+Discover local skills:
+
+```bash
+sxmc skills list --paths tests/fixtures
+sxmc skills info simple-skill --paths tests/fixtures
+```
+
+Render a documentation-first skill body with argument interpolation:
+
+```bash
+sxmc skills run simple-skill --paths tests/fixtures -- repo-name
+```
+
+Run a script-backed skill and forward arguments or environment variables:
+
+```bash
+sxmc skills run skill-with-scripts --paths tests/fixtures -- alpha beta
+sxmc skills run skill-with-scripts --paths tests/fixtures --print-body
+sxmc skills run deploy-skill --paths /absolute/path/to/skills \
+  --script release.sh \
+  --env ENVIRONMENT=staging \
+  --env REGION=ca-central-1 \
+  -- canary
+```
+
 ## Use MCP From The CLI
 
 Ad hoc stdio bridge:
@@ -343,10 +370,12 @@ Notes:
   `--public-key`.
 - `sxmc inspect bundle-keygen --output-dir .sxmc/keys` generates an Ed25519
   signing keypair for portable bundle signing.
+- generated key files now use the explicit names
+  `bundle-signing.ed25519.key.json` and `bundle-signing.ed25519.pub.json`.
 - `sxmc inspect bundle-export --signature-secret env:SXMC_BUNDLE_SECRET ...`
   embeds an HMAC-SHA256 signature into the bundle so downstream pulls can verify
   authenticity without relying on transport trust alone.
-- `sxmc inspect bundle-export --signing-key .sxmc/keys/bundle-signing.key.json ...`
+- `sxmc inspect bundle-export --signing-key .sxmc/keys/bundle-signing.ed25519.key.json ...`
   embeds an Ed25519 signature plus the matching public key into the bundle.
 - `sxmc publish <target>` wraps bundle export plus transport, so you can write
   a team bundle directly to a file path, `file://` URI, or HTTP(S) endpoint,

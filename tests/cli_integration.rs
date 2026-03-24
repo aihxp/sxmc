@@ -211,6 +211,17 @@ fn command_json(args: &[&str]) -> Value {
     serde_json::from_str(&command_stdout(args)).unwrap()
 }
 
+fn command_json_with_config_home(home: &Path, args: &[&str]) -> Value {
+    let output = sxmc_with_config_home(home).args(args).output().unwrap();
+    assert!(
+        output.status.success(),
+        "command failed: {}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
 #[cfg(not(windows))]
 fn write_fake_cli(dir: &Path, help_text: &str) -> std::path::PathBuf {
     let script = dir.join("fake-cli");
@@ -1200,6 +1211,8 @@ fn test_inspect_corpus_stats_and_query() {
         "5",
         "--pretty",
     ]);
+    assert_eq!(query["query"]["search"], Value::from("content"));
+    assert_eq!(query["query"]["limit"], Value::from(5));
     assert!(query["match_count"].as_u64().unwrap_or(0) >= 1);
     assert!(query["entries"].as_array().unwrap().iter().any(|entry| {
         entry["command"].as_str().unwrap_or_default() == "git"
@@ -1209,6 +1222,11 @@ fn test_inspect_corpus_stats_and_query() {
                 .to_lowercase()
                 .contains("content")
     }));
+    assert!(query["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["quality"]["score"].as_u64().unwrap_or(0) > 0));
 }
 
 #[test]
@@ -1418,11 +1436,22 @@ fn test_trust_policy_enforces_signature_quality_and_metadata() {
     ]);
     assert_eq!(value["passed"], Value::Bool(true));
     assert_eq!(value["report"]["signature"]["verified"], Value::Bool(true));
+    assert_eq!(value["report"]["metadata"]["role"], Value::from("platform"));
+    assert!(value["report"]["metadata"]["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry.as_str() == Some("cursor")));
     assert!(value["checks"]
         .as_array()
         .unwrap()
         .iter()
         .all(|entry| entry["passed"].as_bool() == Some(true)));
+    assert!(value["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"].as_str() == Some("require_hosts")));
 }
 
 #[test]
@@ -1530,6 +1559,10 @@ fn test_registry_serve_and_push_support_remote_registry_flow() {
         "--pretty",
     ]);
     assert_eq!(push["transport"], Value::from("http"));
+    assert_eq!(
+        push["result"]["result"]["entry"]["name"],
+        Value::from("Remote Bundle")
+    );
 
     let sync_target = root.join("synced-registry");
     let sync = command_json(&[
@@ -1541,6 +1574,7 @@ fn test_registry_serve_and_push_support_remote_registry_flow() {
         "--pretty",
     ]);
     assert_eq!(sync["imported_count"], Value::from(1));
+    assert_eq!(sync["error_count"], Value::from(0));
 
     let pulled_dir = root.join("remote-registry-pulled");
     let pulled = command_json(&[
@@ -1558,6 +1592,52 @@ fn test_registry_serve_and_push_support_remote_registry_flow() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[test]
+fn test_known_good_prefers_current_bundle_candidate_with_rank_details() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let profiles_dir = root.join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+
+    let mut git = command_json(&["inspect", "cli", "git", "--pretty"]);
+    git["summary"] = Value::from("the stupid content tracker");
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&git).unwrap(),
+    )
+    .unwrap();
+
+    let bundle_path = root.join("known-good.bundle.json");
+    command_json(&[
+        "inspect",
+        "bundle-export",
+        "--root",
+        root.to_str().unwrap(),
+        "--bundle-name",
+        "Known Good Bundle",
+        "--output",
+        bundle_path.to_str().unwrap(),
+        "--pretty",
+    ]);
+
+    let known_good = command_json(&[
+        "inspect",
+        "known-good",
+        bundle_path.to_str().unwrap(),
+        "--command",
+        "git",
+        "--pretty",
+    ]);
+    assert_eq!(known_good["command"], Value::from("git"));
+    assert!(known_good["candidate_count"].as_u64().unwrap_or(0) >= 1);
+    assert_eq!(known_good["selected"]["command"], Value::from("git"));
+    assert!(known_good["selected"]["rank_score"].as_i64().unwrap_or(0) > 0);
+    assert_eq!(
+        known_good["selected"]["quality"]["ready_for_agent_docs"],
+        Value::Bool(true)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1882,32 +1962,38 @@ fn test_inspect_batch_since_skips_unchanged_tools() {
 
 #[test]
 fn test_inspect_cache_invalidate_and_clear() {
-    let _ = command_json(&["inspect", "cli", "cargo", "--compact"]);
-    let _ = command_json(&["inspect", "cli", "git", "--compact"]);
+    let temp = tempfile::tempdir().unwrap();
+    let _ = command_json_with_config_home(temp.path(), &["inspect", "cli", "cargo", "--compact"]);
+    let _ = command_json_with_config_home(temp.path(), &["inspect", "cli", "git", "--compact"]);
 
-    let before = command_json(&["inspect", "cache-stats"]);
+    let before = command_json_with_config_home(temp.path(), &["inspect", "cache-stats"]);
     let before_entries = before["entry_count"].as_u64().unwrap_or(0);
     assert!(before_entries >= 2);
 
-    let invalidate = command_json(&["inspect", "cache-invalidate", "cargo"]);
+    let invalidate =
+        command_json_with_config_home(temp.path(), &["inspect", "cache-invalidate", "cargo"]);
     assert_eq!(invalidate["command"], "cargo");
     assert_eq!(invalidate["match_mode"], "exact");
     assert!(invalidate["removed_entries"].as_u64().unwrap_or(0) >= 1);
     assert!(invalidate["remaining_entries"].as_u64().unwrap_or(0) >= 1);
 
-    let _ = command_json(&["inspect", "cli", "cargo", "--compact"]);
-    let dry_run = command_json(&["inspect", "cache-invalidate", "c*", "--dry-run"]);
+    let _ = command_json_with_config_home(temp.path(), &["inspect", "cli", "cargo", "--compact"]);
+    let dry_run = command_json_with_config_home(
+        temp.path(),
+        &["inspect", "cache-invalidate", "c*", "--dry-run"],
+    );
     assert_eq!(dry_run["dry_run"], Value::Bool(true));
     assert_eq!(dry_run["match_mode"], "glob");
     assert!(dry_run["matched_entries"].as_u64().unwrap_or(0) >= 1);
     assert_eq!(dry_run["removed_entries"], Value::from(0));
 
-    let _ = command_json(&["inspect", "cli", "cargo", "--compact"]);
-    let wildcard = command_json(&["inspect", "cache-invalidate", "g*"]);
+    let _ = command_json_with_config_home(temp.path(), &["inspect", "cli", "cargo", "--compact"]);
+    let wildcard =
+        command_json_with_config_home(temp.path(), &["inspect", "cache-invalidate", "g*"]);
     assert_eq!(wildcard["match_mode"], "glob");
     assert!(wildcard["removed_entries"].as_u64().unwrap_or(0) >= 1);
 
-    let cleared = command_json(&["inspect", "cache-clear"]);
+    let cleared = command_json_with_config_home(temp.path(), &["inspect", "cache-clear"]);
     assert_eq!(cleared["cleared"], Value::Bool(true));
     assert_eq!(cleared["entry_count"], Value::from(0));
 }
@@ -2859,6 +2945,82 @@ fn test_skills_run() {
         .args(["skills", "run", "simple-skill", "--paths", "tests/fixtures"])
         .assert()
         .success();
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_skills_run_executes_single_script_with_args() {
+    sxmc()
+        .args([
+            "skills",
+            "run",
+            "skill-with-scripts",
+            "--paths",
+            "tests/fixtures",
+            "--",
+            "alpha",
+            "beta",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Hello from script! Args: alpha beta",
+        ));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_skills_run_passes_env_vars_to_script() {
+    let temp = tempfile::tempdir().unwrap();
+    let skill_dir = temp.path().join("env-skill");
+    fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: env-skill\ndescription: env skill\n---\nBody output.\n",
+    )
+    .unwrap();
+    let script_path = skill_dir.join("scripts").join("show-env.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nprintf 'env=%s\\n' \"$GREETING\"\nprintf 'sxmc=%s\\n' \"$SXMC_SKILL_NAME\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).unwrap();
+
+    sxmc()
+        .args([
+            "skills",
+            "run",
+            "env-skill",
+            "--paths",
+            temp.path().to_str().unwrap(),
+            "--env",
+            "GREETING=hello",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("env=hello"))
+        .stdout(predicate::str::contains("sxmc=env-skill"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_skills_run_can_print_body_for_script_skills() {
+    sxmc()
+        .args([
+            "skills",
+            "run",
+            "skill-with-scripts",
+            "--paths",
+            "tests/fixtures",
+            "--print-body",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("This skill has tools available."));
 }
 
 #[test]

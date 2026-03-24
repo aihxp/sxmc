@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.38] - 2026-03-24
+
+### Changed
+
+- `sxmc skills run` now executes script-backed skills directly, forwards trailing
+  arguments to the selected script, accepts `--env KEY=VALUE`, and preserves
+  `--print-body` for documentation-first rendering
+- cache invalidation integration coverage now runs against an isolated temp home
+  to avoid cross-test cache interference
+
 ## [0.2.37] - 2026-03-23
 
 ### Added
@@ -21,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - wrapped CLI MCP servers now capture live stdout/stderr event chunks and
   expose them under `sxmc-wrap://executions/<id>/events`
+- `sxmc inspect bundle-keygen` now emits more explicit Ed25519 filenames for
+  generated key material
 
 ## [0.2.36] - 2026-03-23
 
