@@ -27,7 +27,11 @@ impl DiffOutputFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "sxmc", version, about = "Sumac — bring out what your tools can do (Skills × MCP × CLI)")]
+#[command(
+    name = "sxmc",
+    version,
+    about = "Sumac — bring out what your tools can do (Skills × MCP × CLI)"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

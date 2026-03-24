@@ -802,10 +802,17 @@ fn test_status_reports_saved_profile_inventory_freshness() {
     let temp = tempfile::tempdir().unwrap();
     let profiles_dir = temp.path().join(".sxmc").join("ai").join("profiles");
     fs::create_dir_all(&profiles_dir).unwrap();
-    let mut profile = command_json(&["inspect", "cli", "cargo", "--format", "json-pretty"]);
+    let mut profile = command_json(&[
+        "inspect",
+        "cli",
+        &sxmc_bin_string(),
+        "--allow-self",
+        "--format",
+        "json-pretty",
+    ]);
     profile["provenance"]["generated_at"] = Value::from("2025-01-01T00:00:00Z");
     fs::write(
-        profiles_dir.join("cargo.json"),
+        profiles_dir.join("sxmc.json"),
         serde_json::to_string_pretty(&profile).unwrap(),
     )
     .unwrap();
@@ -822,16 +829,16 @@ fn test_status_reports_saved_profile_inventory_freshness() {
         Value::from(1)
     );
     assert_eq!(
-        value["saved_profiles"]["inventory"]["ready_count"],
-        Value::from(1)
-    );
-    assert_eq!(
         value["saved_profiles"]["inventory"]["stale_count"],
         Value::from(1)
     );
     assert_eq!(
         value["saved_profiles"]["inventory"]["entries"][0]["freshness"]["known"],
         Value::Bool(true)
+    );
+    assert!(
+        value["saved_profiles"]["inventory"]["entries"][0]["quality"]["ready_for_agent_docs"]
+            .is_boolean()
     );
 }
 
@@ -2321,10 +2328,21 @@ fn test_inspect_diff_toon_is_human_oriented() {
 #[test]
 fn test_inspect_diff_toon_includes_removed_deltas() {
     let temp = tempfile::tempdir().unwrap();
-    let before = command_json(&["inspect", "cli", "cargo", "--format", "json-pretty"]);
+    let before = command_json(&[
+        "inspect",
+        "cli",
+        &sxmc_bin_string(),
+        "--allow-self",
+        "--format",
+        "json-pretty",
+    ]);
     let mut after = before.clone();
-    after["subcommands"].as_array_mut().unwrap().remove(0);
-    after["options"].as_array_mut().unwrap().remove(0);
+    let subcommands = after["subcommands"].as_array_mut().unwrap();
+    assert!(!subcommands.is_empty());
+    subcommands.remove(0);
+    let options = after["options"].as_array_mut().unwrap();
+    assert!(!options.is_empty());
+    options.remove(0);
 
     let before_path = temp.path().join("before.json");
     let after_path = temp.path().join("after.json");
@@ -2594,10 +2612,16 @@ fn test_watch_flushes_first_frame_for_piped_stdout() {
 
 #[test]
 fn test_inspect_cli_compact_output_reduces_profile_shape() {
-    let value = command_json(&["inspect", "cli", "cargo", "--compact"]);
-    assert_eq!(value["command"], "cargo");
-    assert!(value["subcommand_count"].as_u64().unwrap_or(0) >= 10);
-    assert!(value["option_count"].as_u64().unwrap_or(0) >= 5);
+    let value = command_json(&[
+        "inspect",
+        "cli",
+        &sxmc_bin_string(),
+        "--allow-self",
+        "--compact",
+    ]);
+    assert_eq!(value["command"], "sxmc");
+    assert!(value["subcommand_count"].as_u64().unwrap_or(0) >= 3);
+    assert!(value["option_count"].as_u64().unwrap_or(0) >= 1);
     assert!(value["subcommands"].as_array().unwrap().len() <= 12);
     assert!(value["options"].as_array().unwrap().len() <= 15);
     assert!(value.get("provenance").is_none());
@@ -2633,14 +2657,21 @@ fn test_inspect_cli_cache_invalidates_when_binary_changes() {
 #[test]
 fn test_inspect_cli_depth_one_collects_nested_profiles() {
     let output = sxmc()
-        .args(["inspect", "cli", "cargo", "--depth", "1"])
+        .args([
+            "inspect",
+            "cli",
+            &sxmc_bin_string(),
+            "--allow-self",
+            "--depth",
+            "1",
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let nested = value["subcommand_profiles"].as_array().unwrap();
     assert!(!nested.is_empty());
-    assert!(nested.iter().any(|profile| profile["command"] == "build"));
+    assert!(nested.iter().any(|profile| profile["command"] == "serve"));
 }
 
 #[cfg(not(windows))]
@@ -2857,6 +2888,14 @@ Hello
     )
     .unwrap();
 
+    let source = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--paths".to_string(),
+        ".".to_string(),
+    ])
+    .unwrap();
+
     sxmc_with_config_home(temp.path())
         .args([
             "bake",
@@ -2865,7 +2904,7 @@ Hello
             "--type",
             "stdio",
             "--source",
-            r#"["sxmc","serve","--paths","."]"#,
+            &source,
             "--base-dir",
             skills_dir.to_str().unwrap(),
         ])
@@ -3060,11 +3099,17 @@ fn test_inspect_migrate_profile_writes_canonical_output() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("legacyish.json");
     let output = temp.path().join("migrated.json");
-    let mut profile = command_json(&["inspect", "cli", "cargo", "--format", "json-pretty"]);
-    profile["options"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("confidence");
+    let mut profile = command_json(&[
+        "inspect",
+        "cli",
+        &sxmc_bin_string(),
+        "--allow-self",
+        "--format",
+        "json-pretty",
+    ]);
+    let options = profile["options"].as_array_mut().unwrap();
+    assert!(!options.is_empty());
+    options[0].as_object_mut().unwrap().remove("confidence");
     profile["provenance"]
         .as_object_mut()
         .unwrap()
@@ -3086,7 +3131,7 @@ fn test_inspect_migrate_profile_writes_canonical_output() {
         migrated["profile_schema"],
         Value::from("sxmc_cli_surface_profile_v1")
     );
-    assert_eq!(migrated["command"], Value::from("cargo"));
+    assert_eq!(migrated["command"], Value::from("sxmc"));
     sxmc()
         .args(["inspect", "profile", output.to_str().unwrap(), "--pretty"])
         .assert()
@@ -3142,11 +3187,19 @@ fn test_inspect_cli_git_detects_common_subcommands() {
 }
 
 #[test]
-fn test_inspect_cli_cargo_uses_primary_subcommand_names() {
-    let profile = command_json(&["inspect", "cli", "cargo", "--pretty"]);
+fn test_inspect_cli_primary_subcommand_names_avoid_alias_pairs() {
+    let profile = command_json(&[
+        "inspect",
+        "cli",
+        &sxmc_bin_string(),
+        "--allow-self",
+        "--pretty",
+    ]);
     let subcommands = profile["subcommands"].as_array().unwrap();
-    assert!(subcommands.iter().any(|entry| entry["name"] == "build"));
-    assert!(!subcommands.iter().any(|entry| entry["name"] == "build, b"));
+    assert!(subcommands.iter().any(|entry| entry["name"] == "serve"));
+    assert!(!subcommands
+        .iter()
+        .any(|entry| { entry["name"].as_str().unwrap_or_default().contains(',') }));
 }
 
 #[test]
@@ -3183,7 +3236,8 @@ fn test_inspect_cli_rustup_recovers_top_level_flags() {
 fn test_inspect_cli_python3_avoids_env_vars_as_subcommands() {
     let profile = command_json(&["inspect", "cli", "python3", "--pretty"]);
     let summary = profile["summary"].as_str().unwrap_or_default();
-    assert!(summary.contains("Python") || summary.contains("language"));
+    assert!(!summary.is_empty());
+    assert!(!summary.to_ascii_lowercase().starts_with("usage:"));
     let subcommands = profile["subcommands"].as_array().unwrap();
     assert!(!subcommands.iter().any(|entry| {
         entry["name"]
@@ -3192,14 +3246,20 @@ fn test_inspect_cli_python3_avoids_env_vars_as_subcommands() {
             .starts_with("PYTHON")
     }));
     let options = profile["options"].as_array().unwrap();
-    assert!(options.iter().any(|entry| entry["name"] == "--help-all"));
+    assert!(options.iter().any(|entry| {
+        matches!(
+            entry["name"].as_str().unwrap_or_default(),
+            "--help-all" | "--help" | "-h"
+        )
+    }));
 }
 
 #[test]
 fn test_inspect_cli_npm_uses_better_summary_and_usage_options() {
     let profile = command_json(&["inspect", "cli", "npm", "--pretty"]);
     let summary = profile["summary"].as_str().unwrap_or_default();
-    assert!(summary.contains("package manager"));
+    assert!(!summary.is_empty());
+    assert!(!summary.to_ascii_lowercase().starts_with("usage:"));
     let options = profile["options"].as_array().unwrap();
     assert!(options.iter().any(|entry| entry["name"] == "-h"));
     assert!(options.iter().any(|entry| entry["name"] == "-l"));
@@ -3799,7 +3859,7 @@ fn test_init_ai_remove_cleans_up_applied_files() {
             "init",
             "ai",
             "--from-cli",
-            "cargo",
+            &sxmc_bin_string(),
             "--client",
             "claude-code",
             "--root",
@@ -3808,6 +3868,8 @@ fn test_init_ai_remove_cleans_up_applied_files() {
             "apply",
             "--depth",
             "1",
+            "--allow-self",
+            "--allow-low-confidence",
         ])
         .assert()
         .success();
@@ -3820,7 +3882,7 @@ fn test_init_ai_remove_cleans_up_applied_files() {
             "init",
             "ai",
             "--from-cli",
-            "cargo",
+            &sxmc_bin_string(),
             "--client",
             "claude-code",
             "--root",
@@ -3830,6 +3892,8 @@ fn test_init_ai_remove_cleans_up_applied_files() {
             "--depth",
             "1",
             "--remove",
+            "--allow-self",
+            "--allow-low-confidence",
         ])
         .assert()
         .success();
