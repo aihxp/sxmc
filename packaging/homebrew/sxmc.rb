@@ -1,10 +1,10 @@
 class Sxmc < Formula
   desc "Sumac: bring out what your tools can do (Skills x MCP x CLI)"
-  homepage "https://github.com/aihxp/sxmc"
-  url "https://github.com/aihxp/sxmc/archive/refs/tags/v0.2.38.tar.gz"
-  sha256 "6743844998e050a8b8d3364db3629248f9172462a76392714dfab84629d3a6ea"
+  homepage "https://github.com/aihxp/sumac"
+  url "https://github.com/aihxp/sumac/archive/refs/tags/v0.2.38.tar.gz"
+  sha256 "873f1569f13ab4a8ae2804938c257dd8ff732d66a1aa05d155bd1518734a1bbe"
   license "MIT"
-  head "https://github.com/aihxp/sxmc.git", branch: "master"
+  head "https://github.com/aihxp/sumac.git", branch: "master"
 
   depends_on "rust" => :build
 

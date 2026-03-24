@@ -5,14 +5,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aihxp/sxmc.git"
+    "url": "git+https://github.com/aihxp/sumac.git"
   },
-  "homepage": "https://github.com/aihxp/sxmc",
+  "homepage": "https://github.com/aihxp/sumac",
   "publishConfig": {
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/aihxp/sxmc/issues"
+    "url": "https://github.com/aihxp/sumac/issues"
   },
   "engines": {
     "node": ">=18"
