@@ -1369,9 +1369,9 @@ pub enum DiscoverAction {
         format: Option<output::StructuredOutputFormat>,
     },
 
-    /// Discover tables and columns from a SQLite database
+    /// Discover tables, columns, relations, and indexes from SQLite or PostgreSQL
     Db {
-        /// SQLite database file path
+        /// SQLite database file path or PostgreSQL connection string
         source: String,
 
         /// Show details for a single table or view
@@ -1388,6 +1388,10 @@ pub enum DiscoverAction {
         /// Search/filter by table name or SQL definition
         #[arg(long)]
         search: Option<String>,
+
+        /// Write the discovered database surface to a JSON snapshot file
+        #[arg(long)]
+        output: Option<PathBuf>,
 
         /// Return a compact summary without full column/index/relation arrays
         #[arg(long)]
@@ -1424,9 +1428,9 @@ pub enum DiscoverAction {
         format: Option<output::StructuredOutputFormat>,
     },
 
-    /// Discover request/response surfaces from a HAR capture
+    /// Discover request/response surfaces from HAR captures or saved curl history
     Traffic {
-        /// HAR file path
+        /// HAR file path or curl/history text file
         source: PathBuf,
 
         /// Show details for a single endpoint key, host, or path
@@ -1464,11 +1468,11 @@ pub enum DiscoverAction {
         #[arg(long)]
         before: PathBuf,
 
-        /// Optional second snapshot to compare against instead of a live HAR source
+        /// Optional second snapshot to compare against instead of a live capture source
         #[arg(long)]
         after: Option<PathBuf>,
 
-        /// HAR source to inspect when --after is omitted
+        /// HAR file or curl/history source to inspect when --after is omitted
         #[arg(long)]
         source: Option<PathBuf>,
 

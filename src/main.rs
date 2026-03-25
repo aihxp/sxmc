@@ -5754,6 +5754,7 @@ async fn main() -> Result<()> {
                 list: _,
                 database_type,
                 search,
+                output,
                 compact,
                 pretty,
                 format,
@@ -5769,6 +5770,14 @@ async fn main() -> Result<()> {
                     search.as_deref(),
                     compact,
                 )?;
+                if let Some(path) = output.as_ref() {
+                    if let Some(parent) = path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            fs::create_dir_all(parent)?;
+                        }
+                    }
+                    fs::write(path, serde_json::to_string_pretty(&value)?)?;
+                }
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
                     println!("{}", output::format_structured_value(&value, format));
                 } else {
@@ -5867,7 +5876,7 @@ async fn main() -> Result<()> {
                 } else {
                     let source = source.ok_or_else(|| {
                         sxmc::error::SxmcError::Other(
-                            "discover traffic-diff requires either --after <snapshot.json> or --source <capture.har>".into(),
+                            "discover traffic-diff requires either --after <snapshot.json> or --source <capture.har|curl-history.txt>".into(),
                         )
                     })?;
                     traffic::inspect_traffic_source(&source, None, None, false)?

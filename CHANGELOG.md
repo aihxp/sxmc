@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.41] - 2026-03-25
+
+### Added
+
+- `sxmc discover db --output <snapshot.json>` for saving SQLite/PostgreSQL
+  schema discovery snapshots
+
+### Changed
+
+- `discover db` and `discover traffic` help text now reflects the full supported
+  source types instead of underselling PostgreSQL and curl-history support
+- the validation script guide now tracks the current discovery lifecycle section
+  layout instead of the pre-`v0.2.40` numbering
+
 ## [0.2.40] - 2026-03-24
 
 ### Added

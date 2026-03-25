@@ -1,9 +1,9 @@
 # Sumac Test Script Guide
 
 **Script:** `scripts/test-sxmc.sh`
-**Lines:** ~1625
-**Sections:** 39 (4 parts: old features, new features, 10x10x10 matrix, benchmarks)
-**Tests:** 250
+**Lines:** ~1635
+**Sections:** 40 (4 parts: old features, new features, 10x10x10 matrix, benchmarks)
+**Tests:** See the latest validation report
 
 ---
 
@@ -11,7 +11,7 @@
 
 `test-sxmc.sh` is a comprehensive, cross-platform bash test + benchmark suite for Sumac (`sxmc`). It validates every major feature surface — CLI inspection, MCP pipeline, API mode, security scanning, scaffolds, AI host initialization, caching, doctor diagnostics, profile diffing, wrap, status/watch, publish/pull, bundle signing, corpus, registry, trust, and side-by-side comparisons — using only `bash` and `python3`.
 
-The script was developed iteratively across sxmc versions v0.2.10 through v0.2.39, growing from ~50 tests to 250 tests as features were added.
+The script was developed iteratively across sxmc versions v0.2.10 through v0.2.41, growing from ~50 tests to the current release-sized validation suite as features were added.
 
 ---
 
@@ -125,7 +125,7 @@ Re-validates all features from v0.2.10–v0.2.21:
 | 17. Serve | serve --help, skills list |
 | 18. Wrap (basic) | wrap --help flags |
 
-### Part B — New Features v0.2.22–v0.2.39 (Sections 19–31)
+### Part B — New Features v0.2.22–v0.2.41 (Sections 19–32)
 
 | Section | What it tests |
 |---|---|
@@ -142,24 +142,25 @@ Re-validates all features from v0.2.10–v0.2.21:
 | 29. Doctor Enhancements | --remove for cleanup |
 | 30. CI Scaffold | scaffold ci generates GitHub Actions workflows |
 | 31. Health Gates | --health --exit-code returns 0/1 |
+| 32. Discovery Lifecycle | GraphQL/traffic lifecycle help, curl history detection, codebase/db/traffic/graphql snapshot and diff coverage |
 
-### Part C — 10x10x10 Matrix (Sections 32–35)
+### Part C — 10x10x10 Matrix (Sections 33–36)
 
 | Section | What it tests |
 |---|---|
-| 32. 10 Known CLIs | git, curl, ls, ssh, tar, grep, find, gh, python3, jq — each: inspect, compact, scaffold, init-ai |
-| 33. 10 Known Skills | 4 fixtures + 6 synthetic — list, info, run, --script, --env, --print-body, serve (MCP tools/prompts/resources), MCP tool calls |
-| 34. 10 Known MCPs | 1 fixture + 4 npm + 1 self-host + 4 synthetic — bake, list, tools, grep, remove |
-| 35. Side-by-Side | With vs without Sumac: CLI understanding, AI host config, CLI→MCP, skill execution, serve, full pipeline — with timing |
+| 33. 10 Known CLIs | git, curl, ls, ssh, tar, grep, find, gh, python3, jq — each: inspect, compact, scaffold, init-ai |
+| 34. 10 Known Skills | 4 fixtures + 6 synthetic — list, info, run, --script, --env, --print-body, serve (MCP tools/prompts/resources), MCP tool calls |
+| 35. 10 Known MCPs | 1 fixture + 4 npm + 1 self-host + 4 synthetic — bake, list, tools, grep, remove |
+| 36. Side-by-Side | With vs without Sumac: CLI understanding, AI host config, CLI→MCP, skill execution, serve, full pipeline — with timing |
 
-### Part D — Benchmarks (Sections 36–39)
+### Part D — Benchmarks (Sections 37–40)
 
 | Section | What it measures |
 |---|---|
-| 36. CLI Inspection | Cold/warm per-tool (5 runs median), batch --parallel 1 vs 4 |
-| 37. Wrap & MCP | wrap git → stdio --list latency |
-| 38. Bundle | Export, HMAC sign timing |
-| 39. Pipeline | inspect → scaffold → init-ai for 5 CLIs end-to-end |
+| 37. CLI Inspection | Cold/warm per-tool (5 runs median), batch --parallel 1 vs 4 |
+| 38. Wrap & MCP | wrap git → stdio --list latency |
+| 39. Bundle | Export, HMAC sign timing |
+| 40. Pipeline | inspect → scaffold → init-ai for 5 CLIs end-to-end |
 
 ---
 
@@ -173,6 +174,8 @@ The test script was developed during structured testing sessions across sxmc rel
 4. **v0.2.17–v0.2.21** — Diff engine, completion integration, doctor fix, schema tolerance (136 tests)
 5. **v0.2.22–v0.2.37** — Major rewrite: added Part B (new features), Part C (10x10x10 matrix), Part D (benchmarks). Wrap, status, watch, publish/pull, bundles, signing, corpus, registry, trust, CI scaffold, health gates (247 tests)
 6. **v0.2.38–v0.2.39** — Added skills execution depth (--script, --env, --print-body), side-by-side comparisons, MCP tool call tests, and final metadata-sync cleanup (250 tests)
+7. **v0.2.40** — Added GraphQL/traffic discovery lifecycle coverage plus codebase and database discovery snapshot checks (published report: 257 tests)
+8. **v0.2.41** — Added `discover db --output`, corrected discovery help text, and aligned script numbering/docs with the current 275-test suite
 
 ### Key debugging lessons
 

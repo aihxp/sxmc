@@ -6117,6 +6117,46 @@ curl https://cdn.example.com/assets/app.js
     assert_eq!(filtered["endpoints"][0]["host"], "cdn.example.com");
 }
 
+#[test]
+fn test_discover_db_output_writes_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let db_path = temp.path().join("test.db");
+    let snapshot_path = temp.path().join("db-snapshot.json");
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    sxmc()
+        .args([
+            "discover",
+            "db",
+            db_path.to_str().unwrap(),
+            "--output",
+            snapshot_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+
+    assert!(snapshot_path.exists());
+    let snapshot: Value =
+        serde_json::from_str(&fs::read_to_string(&snapshot_path).unwrap()).unwrap();
+    assert_eq!(snapshot["source_type"], "database");
+    assert_eq!(snapshot["database_type"], "sqlite");
+    assert!(snapshot["count"].as_u64().unwrap_or(0) >= 2);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_skills_create_from_local_spec() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

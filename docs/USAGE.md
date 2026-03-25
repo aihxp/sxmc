@@ -214,6 +214,8 @@ Network timeout notes:
   does the same for saved `curl`/shell history
 - `sxmc discover traffic-diff --before traffic.json --source capture.har`
   compares a saved traffic snapshot against a new HAR or curl-history source
+- `sxmc discover db database.sqlite --output db.json` snapshots SQLite or
+  PostgreSQL schema discovery for later review or sharing
 
 ## Turn CLIs Into AI Startup Surfaces
 

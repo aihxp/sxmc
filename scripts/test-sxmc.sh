@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Sumac (sxmc) comprehensive test + benchmark suite
-# Covers: ALL v0.2.10–v0.2.39 features, 10×10×10 matrix, benchmarks
+# Covers: ALL v0.2.10–v0.2.40 features, 10×10×10 matrix, benchmarks
 # Usage: bash scripts/test-sxmc.sh [--json results.json]
 # Env:   SXMC=path/to/sxmc (default: sxmc on PATH, or target/release/sxmc)
 #        BENCH_RUNS=5 (benchmark iterations)
@@ -1003,6 +1003,148 @@ disc_traffic_diff_help=$("$SXMC" discover traffic-diff --help 2>&1 || true)
 echo "$disc_traffic_diff_help" | grep -q -- "--before" && pass "discover traffic-diff has --before" || fail "discover traffic-diff has --before"
 echo "$disc_traffic_diff_help" | grep -q -- "--source" && pass "discover traffic-diff has --source" || fail "discover traffic-diff has --source"
 
+# --- Discover Codebase (v0.2.40) ---
+codebase_out=$("$SXMC" discover codebase 2>/dev/null || true)
+if [ -n "$codebase_out" ] && json_check "$codebase_out" "d.get('config_count', 0) >= 5"; then
+  cb_count=$(json_field "$codebase_out" "d['config_count']")
+  pass "discover codebase finds $cb_count configs"
+else
+  fail "discover codebase" "${codebase_out:0:100}"
+fi
+
+codebase_compact=$("$SXMC" discover codebase --compact 2>/dev/null || true)
+if [ -n "$codebase_compact" ] && [ ${#codebase_compact} -lt ${#codebase_out} ]; then
+  pass "discover codebase --compact is smaller"
+else
+  fail "discover codebase --compact" "not smaller than full"
+fi
+
+cb_snapshot="$TMPDIR_TEST/codebase-snapshot.json"
+"$SXMC" discover codebase --output "$cb_snapshot" 2>/dev/null
+if [ -f "$cb_snapshot" ] && [ -s "$cb_snapshot" ]; then
+  pass "discover codebase --output writes snapshot"
+else
+  fail "discover codebase --output" "snapshot file missing or empty"
+fi
+
+cb_diff=$("$SXMC" discover codebase-diff --before "$cb_snapshot" 2>/dev/null || true)
+if [ -n "$cb_diff" ]; then
+  pass "discover codebase-diff --before produces output"
+else
+  fail "discover codebase-diff" "no output"
+fi
+
+if "$SXMC" discover codebase-diff --before "$cb_snapshot" --exit-code >/dev/null 2>&1; then
+  pass "discover codebase-diff --exit-code returns 0 (no drift)"
+else
+  fail "discover codebase-diff --exit-code should return 0 for same snapshot"
+fi
+
+# --- Discover DB (v0.2.40, synthetic SQLite) ---
+test_db="$TMPDIR_TEST/test.db"
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('$test_db')
+c = conn.cursor()
+c.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)')
+c.execute('CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, FOREIGN KEY(user_id) REFERENCES users(id))')
+c.execute('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL, category TEXT)')
+c.execute('INSERT INTO users VALUES (1, \"Ada\", \"ada@example.com\")')
+c.execute('INSERT INTO orders VALUES (1, 1, 42.50)')
+conn.commit()
+conn.close()
+" 2>/dev/null
+
+if [ -f "$test_db" ]; then
+  db_list=$("$SXMC" discover db "$test_db" --list 2>/dev/null || true)
+  if [ -n "$db_list" ] && json_check "$db_list" "d.get('count', 0) >= 3"; then
+    db_count=$(json_field "$db_list" "d['count']")
+    pass "discover db --list finds $db_count tables"
+  else
+    fail "discover db --list" "${db_list:0:100}"
+  fi
+
+  db_search=$("$SXMC" discover db "$test_db" --search users 2>/dev/null || true)
+  if [ -n "$db_search" ] && echo "$db_search" | grep -qi "users"; then
+    pass "discover db --search filters tables"
+  else
+    fail "discover db --search" "${db_search:0:100}"
+  fi
+
+  db_detail=$("$SXMC" discover db "$test_db" users 2>/dev/null || true)
+  if [ -n "$db_detail" ] && echo "$db_detail" | grep -qi "column\|name\|email"; then
+    pass "discover db <table> shows columns"
+  else
+    fail "discover db <table>" "${db_detail:0:100}"
+  fi
+
+  db_snapshot="$TMPDIR_TEST/db-snapshot.json"
+  "$SXMC" discover db "$test_db" --output "$db_snapshot" >/dev/null 2>&1 || true
+  if [ -f "$db_snapshot" ] && [ -s "$db_snapshot" ]; then
+    pass "discover db --output writes snapshot"
+  else
+    fail "discover db --output" "snapshot missing or empty"
+  fi
+
+else
+  skip "discover db tests" "python3 failed to create SQLite"
+fi
+
+# --- Discover Traffic snapshot + diff (v0.2.40) ---
+traffic_snapshot="$TMPDIR_TEST/traffic-snapshot.json"
+sxmc_isolated discover traffic "$TMPDIR_TEST/curl-history.txt" --output "$traffic_snapshot" 2>/dev/null || true
+if [ -f "$traffic_snapshot" ] && [ -s "$traffic_snapshot" ]; then
+  pass "discover traffic --output writes snapshot"
+else
+  fail "discover traffic --output" "snapshot missing or empty"
+fi
+
+if [ -f "$traffic_snapshot" ]; then
+  if "$SXMC" discover traffic-diff --before "$traffic_snapshot" --after "$traffic_snapshot" --exit-code >/dev/null 2>&1; then
+    pass "discover traffic-diff --exit-code returns 0 (identical snapshots)"
+  else
+    fail "discover traffic-diff --exit-code should return 0 for same snapshot"
+  fi
+fi
+
+# --- Discover GraphQL (v0.2.40, needs network) ---
+GRAPHQL_URL="https://graphql.anilist.co"
+if has_cmd curl && curl -s --max-time 5 -X POST -H "Content-Type: application/json" -d '{"query":"{__typename}"}' "$GRAPHQL_URL" >/dev/null 2>&1; then
+  gql_list=$("$SXMC" discover graphql "$GRAPHQL_URL" --list --timeout-seconds 10 2>/dev/null || true)
+  if [ -n "$gql_list" ] && json_check "$gql_list" "d.get('count', 0) >= 1"; then
+    gql_ops=$(json_field "$gql_list" "d['count']")
+    pass "discover graphql --list finds $gql_ops operations"
+  else
+    fail "discover graphql --list" "${gql_list:0:100}"
+  fi
+
+  gql_schema=$("$SXMC" discover graphql "$GRAPHQL_URL" --schema --timeout-seconds 10 2>/dev/null || true)
+  if [ -n "$gql_schema" ] && json_check "$gql_schema" "d.get('operation_count', 0) >= 1"; then
+    gql_ops_s=$(json_field "$gql_schema" "d['operation_count']")
+    pass "discover graphql --schema finds $gql_ops_s operations"
+  else
+    fail "discover graphql --schema" "${gql_schema:0:100}"
+  fi
+
+  gql_snapshot="$TMPDIR_TEST/graphql-snapshot.json"
+  "$SXMC" discover graphql "$GRAPHQL_URL" --schema --output "$gql_snapshot" --timeout-seconds 10 2>/dev/null || true
+  if [ -f "$gql_snapshot" ] && [ -s "$gql_snapshot" ]; then
+    pass "discover graphql --output writes snapshot"
+  else
+    fail "discover graphql --output" "snapshot missing or empty"
+  fi
+
+  if [ -f "$gql_snapshot" ]; then
+    if "$SXMC" discover graphql-diff --before "$gql_snapshot" --url "$GRAPHQL_URL" --exit-code --timeout-seconds 10 >/dev/null 2>&1; then
+      pass "discover graphql-diff --exit-code returns 0 (no schema drift)"
+    else
+      fail "discover graphql-diff --exit-code should return 0 against same endpoint"
+    fi
+  fi
+else
+  skip "discover graphql live tests" "no network or GraphQL endpoint unreachable"
+fi
+
 # ============================================================================
 # PART C — 10×10×10 MATRIX
 # ============================================================================
@@ -1268,8 +1410,8 @@ fi
 
 pass "skills matrix: $SKILL_COUNT skills tested (with info, run, serve, MCP calls)"
 
-# ── Section 34: 10 Known MCPs ──
-section "34. 10 Known MCPs"
+# ── Section 35: 10 Known MCPs ──
+section "35. 10 Known MCPs"
 
 MCP_COUNT=0
 MCP_BAKE_HOME="$TMPDIR_TEST/mcp-matrix-home"
@@ -1387,8 +1529,8 @@ done
 
 pass "MCP matrix: $MCP_COUNT MCPs tested"
 
-# ── Section 35: Side-by-Side (with vs without sxmc) ──
-section "35. Side-by-Side: With vs Without sxmc"
+# ── Section 36: Side-by-Side (with vs without sxmc) ──
+section "36. Side-by-Side: With vs Without sxmc"
 
 # CLI Understanding
 if has_cmd git; then
@@ -1483,6 +1625,59 @@ print(int((time.time()-t0)*1000))
   bench_record "sidebyside_full_pipeline_ms" "$pipeline_ms"
 fi
 
+# Codebase Understanding (v0.2.40)
+without_cb_ms=$(python3 -c "
+import subprocess, time
+t0 = time.time()
+subprocess.run(['find', '.', '-name', '*.yml', '-path', '.github/*'], capture_output=True)
+subprocess.run(['ls', '-la', 'Cargo.toml', 'README.md'], capture_output=True)
+print(int((time.time()-t0)*1000))
+")
+with_cb_ms=$(time_ms "$SXMC" discover codebase)
+with_cb_count=$(json_field "$("$SXMC" discover codebase 2>/dev/null)" "d.get('config_count',0)")
+printf "  Without sxmc: find + ls + manual inspection, %sms, unstructured text\n" "$without_cb_ms"
+printf "  With    sxmc: discover codebase → %s configs, structured JSON, %sms\n" "$with_cb_count" "$with_cb_ms"
+pass "side-by-side: codebase understanding (manual find/ls vs structured discovery)"
+bench_record "sidebyside_without_codebase_ms" "$without_cb_ms"
+bench_record "sidebyside_with_codebase_ms" "$with_cb_ms"
+
+# Database Schema (v0.2.40)
+if [ -f "$test_db" ]; then
+  without_db_ms=$(python3 -c "
+import subprocess, time
+t0 = time.time()
+subprocess.run(['sqlite3', '$test_db', '.tables'], capture_output=True)
+subprocess.run(['sqlite3', '$test_db', '.schema users'], capture_output=True)
+subprocess.run(['sqlite3', '$test_db', '.schema orders'], capture_output=True)
+print(int((time.time()-t0)*1000))
+" 2>/dev/null || echo "0")
+  with_db_ms=$(time_ms "$SXMC" discover db "$test_db")
+  printf "  Without sxmc: 3 sqlite3 commands, unstructured text, %sms\n" "$without_db_ms"
+  printf "  With    sxmc: discover db → all tables + columns, structured JSON, %sms\n" "$with_db_ms"
+  pass "side-by-side: database schema (multiple sqlite3 calls vs single discover)"
+  bench_record "sidebyside_without_db_ms" "$without_db_ms"
+  bench_record "sidebyside_with_db_ms" "$with_db_ms"
+fi
+
+# Traffic Analysis (v0.2.40)
+if [ -f "$TMPDIR_TEST/curl-history.txt" ]; then
+  without_traffic_ms=$(python3 -c "
+import time
+t0 = time.time()
+# Without sxmc: manually parse curl commands or open HAR in browser devtools
+with open('$TMPDIR_TEST/curl-history.txt') as f:
+    lines = f.readlines()
+    endpoints = [l.strip() for l in lines if l.strip()]
+print(int((time.time()-t0)*1000))
+")
+  with_traffic_ms=$(time_ms "$SXMC" discover traffic "$TMPDIR_TEST/curl-history.txt")
+  printf "  Without sxmc: manual parsing of curl history / open HAR in browser, %sms\n" "$without_traffic_ms"
+  printf "  With    sxmc: discover traffic → structured endpoint map, %sms\n" "$with_traffic_ms"
+  pass "side-by-side: traffic analysis (manual vs structured discovery)"
+  bench_record "sidebyside_without_traffic_ms" "$without_traffic_ms"
+  bench_record "sidebyside_with_traffic_ms" "$with_traffic_ms"
+fi
+
 # ============================================================================
 # PART D — BENCHMARKS
 # ============================================================================
@@ -1490,8 +1685,8 @@ printf "\n${BOLD}╔════════════════════
 printf "\n${BOLD}║  PART D — BENCHMARKS ($BENCH_RUNS runs)         ║${RESET}"
 printf "\n${BOLD}╚════════════════════════════════════════╝${RESET}\n"
 
-# ── Section 35: CLI Inspection Benchmarks ──
-section "36. CLI Inspection Benchmarks"
+# ── Section 37: CLI Inspection Benchmarks ──
+section "37. CLI Inspection Benchmarks"
 
 BENCH_CLIS=(git curl ls ssh tar)
 for cmd in "${BENCH_CLIS[@]}"; do
@@ -1554,8 +1749,8 @@ if has_cmd git && has_cmd curl && has_cmd ls; then
   pass "batch parallelism benchmarks complete"
 fi
 
-# ── Section 36: Wrap Benchmark ──
-section "37. Wrap & MCP Benchmarks"
+# ── Section 38: Wrap Benchmark ──
+section "38. Wrap & MCP Benchmarks"
 
 if has_cmd git; then
   declare -a wrap_times=()
@@ -1569,8 +1764,8 @@ if has_cmd git; then
   pass "wrap benchmark complete"
 fi
 
-# ── Section 37: Bundle Benchmark ──
-section "38. Bundle Benchmarks"
+# ── Section 39: Bundle Benchmark ──
+section "39. Bundle Benchmarks"
 
 if has_cmd git; then
   B_HOME="$TMPDIR_TEST/bench-bundle"
@@ -1613,8 +1808,8 @@ print(int((time.time() - t0) * 1000))
   pass "bundle benchmarks complete"
 fi
 
-# ── Section 38: Pipeline Benchmark ──
-section "39. End-to-End Pipeline Benchmark"
+# ── Section 40: Pipeline Benchmark ──
+section "40. End-to-End Pipeline Benchmark"
 
 PIPELINE_CLIS=(git curl ls ssh tar)
 declare -a pipeline_times=()
