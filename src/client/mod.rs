@@ -9,6 +9,7 @@
 //! - auto-detected API sources via [`crate::client::api`]
 //! - local SQLite schema sources via [`crate::client::database`]
 //! - local codebase manifests and task runners via [`crate::client::codebase`]
+//! - saved HAR captures via [`crate::client::traffic`]
 
 use rmcp::model::CallToolRequestParams;
 
@@ -20,6 +21,7 @@ pub mod graphql;
 pub mod mcp_http;
 pub mod mcp_stdio;
 pub mod openapi;
+pub mod traffic;
 
 pub(crate) fn build_call_tool_params(
     name: &str,

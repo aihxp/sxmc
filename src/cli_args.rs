@@ -1363,9 +1363,70 @@ pub enum DiscoverAction {
         /// Codebase root (defaults to current working directory)
         root: Option<PathBuf>,
 
+        /// Write the discovered codebase surface to a JSON snapshot file
+        #[arg(long)]
+        output: Option<PathBuf>,
+
         /// Return a compact summary without full manifest/config arrays
         #[arg(long)]
         compact: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+
+    /// Discover request/response surfaces from a HAR capture
+    Traffic {
+        /// HAR file path
+        source: PathBuf,
+
+        /// Show details for a single endpoint key, host, or path
+        endpoint: Option<String>,
+
+        /// List matching endpoints
+        #[arg(long)]
+        list: bool,
+
+        /// Search/filter by method, host, path, URL, or content type
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Return a compact summary without full endpoint arrays
+        #[arg(long)]
+        compact: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+
+    /// Compare saved and live codebase discovery snapshots
+    #[command(name = "codebase-diff")]
+    CodebaseDiff {
+        /// Saved codebase discovery snapshot
+        #[arg(long)]
+        before: PathBuf,
+
+        /// Optional second snapshot to compare against instead of a live root
+        #[arg(long)]
+        after: Option<PathBuf>,
+
+        /// Live codebase root (defaults to current working directory when --after is omitted)
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Exit non-zero when differences are found
+        #[arg(long)]
+        exit_code: bool,
 
         /// Pretty-print JSON output
         #[arg(long)]

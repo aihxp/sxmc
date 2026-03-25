@@ -5365,6 +5365,7 @@ fn test_discover_codebase_reports_manifests_tasks_and_entrypoints() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join(".github").join("workflows")).unwrap();
     fs::create_dir_all(temp.path().join(".cursor").join("rules")).unwrap();
+    fs::create_dir_all(temp.path().join("requirements")).unwrap();
     fs::write(
         temp.path().join("Cargo.toml"),
         r#"[package]
@@ -5391,6 +5392,39 @@ path = "src/main.rs"
     )
     .unwrap();
     fs::write(
+        temp.path().join("pyproject.toml"),
+        r#"[project]
+name = "demo-py"
+version = "0.1.0"
+
+[project.scripts]
+demo-task = "demo.cli:main"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("Makefile"),
+        "build:\n\tcargo build\n\ndev:\n\tnpm run dev\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("requirements").join("dev.txt"),
+        "pytest==8.0.0\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("docker-compose.yml"),
+        "services:\n  web:\n    image: nginx:latest\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("turbo.json"), "{ \"pipeline\": {} }\n").unwrap();
+    fs::write(
+        temp.path().join("tsconfig.json"),
+        "{ \"compilerOptions\": {} }\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("vite.config.ts"), "export default {};\n").unwrap();
+    fs::write(
         temp.path().join(".github").join("workflows").join("ci.yml"),
         "name: CI\non: [push]\n",
     )
@@ -5409,8 +5443,8 @@ path = "src/main.rs"
         "json",
     ]);
     assert_eq!(value["source_type"], "codebase");
-    assert_eq!(value["manifest_count"], 2);
-    assert!(value["task_runner_count"].as_u64().unwrap_or(0) >= 2);
+    assert_eq!(value["manifest_count"], 4);
+    assert!(value["task_runner_count"].as_u64().unwrap_or(0) >= 5);
     assert!(value["entrypoints"]
         .as_array()
         .unwrap()
@@ -5421,11 +5455,56 @@ path = "src/main.rs"
         .unwrap()
         .iter()
         .any(|entry| entry["name"] == "dev" && entry["kind"] == "npm-script"));
+    assert!(value["entrypoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "build" && entry["kind"] == "make-target"));
+    assert!(value["entrypoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "demo-task" && entry["kind"] == "python-script"));
     assert!(value["configs"]
         .as_array()
         .unwrap()
         .iter()
         .any(|entry| entry["kind"] == "github-workflow"));
+    assert!(value["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "rust"));
+    assert!(value["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "node"));
+    assert!(value["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "python"));
+    assert!(value["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "containerized"));
+    assert!(value["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "frontend"));
+    assert!(value["recommended_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["command"] == "cargo build"));
+    assert!(value["recommended_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["command"] == "npm run dev"));
 
     let compact = command_json(&[
         "discover",
@@ -5435,13 +5514,243 @@ path = "src/main.rs"
         "--format",
         "json",
     ]);
-    assert_eq!(compact["manifest_count"], 2);
+    assert_eq!(compact["manifest_count"], 4);
     assert!(compact.get("manifests").is_none());
     assert!(compact["entrypoint_names"]
         .as_array()
         .unwrap()
         .iter()
         .any(|entry| entry == "demo-cli"));
+    assert!(compact["project_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "python"));
+    assert!(compact["recommended_command_names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "build"));
+}
+
+#[test]
+fn test_discover_codebase_output_and_diff_report_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("Cargo.toml"),
+        r#"[package]
+name = "demo-app"
+version = "0.1.0"
+edition = "2021"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        serde_json::to_string_pretty(&json!({
+            "name": "demo-web",
+            "scripts": {
+                "dev": "vite"
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let snapshot = temp.path().join("codebase-before.json");
+    sxmc()
+        .args([
+            "discover",
+            "codebase",
+            temp.path().to_str().unwrap(),
+            "--output",
+            snapshot.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+    assert!(snapshot.exists());
+
+    fs::write(
+        temp.path().join("pyproject.toml"),
+        r#"[project]
+name = "demo-py"
+version = "0.1.0"
+
+[project.scripts]
+demo-task = "demo.cli:main"
+"#,
+    )
+    .unwrap();
+    fs::write(temp.path().join("Makefile"), "build:\n\tcargo build\n").unwrap();
+
+    let diff = command_json(&[
+        "discover",
+        "codebase-diff",
+        "--before",
+        snapshot.to_str().unwrap(),
+        "--root",
+        temp.path().to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(diff["source_type"], "codebase-diff");
+    assert!(diff["manifest_count_changed"].as_bool().unwrap_or(false));
+    assert!(diff["task_runner_count_changed"].as_bool().unwrap_or(false));
+    assert!(diff["project_kinds_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "python"));
+    assert!(diff["entrypoints_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "make-target:build"));
+    assert!(diff["recommended_commands_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "make-help: make"));
+
+    sxmc()
+        .args([
+            "discover",
+            "codebase-diff",
+            "--before",
+            snapshot.to_str().unwrap(),
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--exit-code",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_discover_traffic_har_groups_searches_and_compacts() {
+    let temp = tempfile::tempdir().unwrap();
+    let har_path = temp.path().join("capture.har");
+    fs::write(
+        &har_path,
+        serde_json::to_string_pretty(&json!({
+            "log": {
+                "version": "1.2",
+                "creator": { "name": "sxmc-test", "version": "1.0" },
+                "entries": [
+                    {
+                        "request": {
+                            "method": "GET",
+                            "url": "https://api.example.com/users?page=1"
+                        },
+                        "response": {
+                            "status": 200,
+                            "content": { "mimeType": "application/json" }
+                        }
+                    },
+                    {
+                        "request": {
+                            "method": "GET",
+                            "url": "https://api.example.com/users?page=2"
+                        },
+                        "response": {
+                            "status": 304,
+                            "content": { "mimeType": "application/json" }
+                        }
+                    },
+                    {
+                        "request": {
+                            "method": "POST",
+                            "url": "https://api.example.com/users"
+                        },
+                        "response": {
+                            "status": 201,
+                            "content": { "mimeType": "application/json" }
+                        }
+                    },
+                    {
+                        "request": {
+                            "method": "GET",
+                            "url": "https://cdn.example.com/assets/app.js"
+                        },
+                        "response": {
+                            "status": 200,
+                            "content": { "mimeType": "application/javascript" }
+                        }
+                    }
+                ]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let value = command_json(&[
+        "discover",
+        "traffic",
+        har_path.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(value["source_type"], "traffic");
+    assert_eq!(value["request_count"], 4);
+    assert_eq!(value["endpoint_count"], 3);
+    assert!(value["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["key"] == "GET api.example.com /users" && entry["count"] == 2));
+    assert!(value["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["key"] == "POST api.example.com /users" && entry["count"] == 1));
+
+    let filtered = command_json(&[
+        "discover",
+        "traffic",
+        har_path.to_str().unwrap(),
+        "--search",
+        "javascript",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(filtered["endpoint_count"], 1);
+    assert_eq!(filtered["endpoints"][0]["host"], "cdn.example.com");
+
+    let endpoint = command_json(&[
+        "discover",
+        "traffic",
+        har_path.to_str().unwrap(),
+        "/users",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(endpoint["endpoint_count"], 2);
+    assert!(endpoint["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["path"] == "/users"));
+
+    let compact = command_json(&[
+        "discover",
+        "traffic",
+        har_path.to_str().unwrap(),
+        "--compact",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(compact["endpoint_count"], 3);
+    assert!(compact.get("endpoints").is_none());
+    assert!(compact["endpoint_keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "GET api.example.com /users"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -37,7 +37,7 @@ use sxmc::auth::secrets::{resolve_header, resolve_secret};
 use sxmc::bake::config::SourceType;
 use sxmc::bake::{BakeConfig, BakeStore};
 use sxmc::cli_surfaces::{self, AiClientProfile, AiCoverage, ArtifactMode};
-use sxmc::client::{api, codebase, database, graphql, mcp_http, mcp_stdio, openapi};
+use sxmc::client::{api, codebase, database, graphql, mcp_http, mcp_stdio, openapi, traffic};
 use sxmc::error::Result;
 use sxmc::output;
 use sxmc::security;
@@ -191,12 +191,114 @@ fn print_codebase_discovery_report(value: &Value) {
         value["entrypoint_count"].as_u64().unwrap_or(0),
         value["config_count"].as_u64().unwrap_or(0)
     );
+    if let Some(project_kinds) = value["project_kinds"].as_array() {
+        if !project_kinds.is_empty() {
+            let kinds = project_kinds
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("Project kinds: {kinds}");
+        }
+    }
     if let Some(entrypoints) = value["entrypoints"].as_array() {
         for entry in entrypoints {
             println!(
                 "- {} ({})",
                 entry["name"].as_str().unwrap_or("<unknown>"),
                 entry["kind"].as_str().unwrap_or("entrypoint")
+            );
+        }
+    }
+    if let Some(recommended_commands) = value["recommended_commands"].as_array() {
+        if !recommended_commands.is_empty() {
+            println!("Recommended commands:");
+            for command in recommended_commands.iter().take(5) {
+                println!("  - {}", command["command"].as_str().unwrap_or("<unknown>"));
+            }
+        }
+    }
+}
+
+fn print_codebase_diff_report(value: &Value) {
+    println!(
+        "Codebase diff: {} -> {}",
+        value["before_root"].as_str().unwrap_or("<unknown>"),
+        value["after_root"].as_str().unwrap_or("<unknown>")
+    );
+    let mut changed_sections = 0u64;
+    for field in [
+        "manifest_count_changed",
+        "task_runner_count_changed",
+        "entrypoint_count_changed",
+        "config_count_changed",
+    ] {
+        if value[field].as_bool().unwrap_or(false) {
+            changed_sections += 1;
+        }
+    }
+    for field in [
+        "project_kinds_added",
+        "project_kinds_removed",
+        "manifests_added",
+        "manifests_removed",
+        "task_runners_added",
+        "task_runners_removed",
+        "entrypoints_added",
+        "entrypoints_removed",
+        "configs_added",
+        "configs_removed",
+        "recommended_commands_added",
+        "recommended_commands_removed",
+    ] {
+        if value[field]
+            .as_array()
+            .map(|items| !items.is_empty())
+            .unwrap_or(false)
+        {
+            changed_sections += 1;
+        }
+    }
+    println!("Changed sections: {changed_sections}");
+
+    let print_list = |label: &str, field: &str| {
+        if let Some(items) = value[field].as_array() {
+            if !items.is_empty() {
+                println!("{label}:");
+                for item in items {
+                    println!("  - {}", item.as_str().unwrap_or("<unknown>"));
+                }
+            }
+        }
+    };
+
+    print_list("Project kinds added", "project_kinds_added");
+    print_list("Project kinds removed", "project_kinds_removed");
+    print_list("Entrypoints added", "entrypoints_added");
+    print_list("Entrypoints removed", "entrypoints_removed");
+    print_list("Recommended commands added", "recommended_commands_added");
+    print_list(
+        "Recommended commands removed",
+        "recommended_commands_removed",
+    );
+}
+
+fn print_traffic_discovery_report(value: &Value) {
+    println!(
+        "Traffic capture: {}",
+        value["source"].as_str().unwrap_or("<unknown>")
+    );
+    println!(
+        "Discovered {} grouped endpoints across {} requests",
+        value["endpoint_count"].as_u64().unwrap_or(0),
+        value["request_count"].as_u64().unwrap_or(0)
+    );
+    if let Some(endpoints) = value["endpoints"].as_array() {
+        for endpoint in endpoints.iter().take(10) {
+            println!(
+                "- {} [{} request(s)]",
+                endpoint["key"].as_str().unwrap_or("<unknown>"),
+                endpoint["count"].as_u64().unwrap_or(0)
             );
         }
     }
@@ -4086,6 +4188,63 @@ fn diff_value_has_changes(value: &Value) -> bool {
         || value["before_nested_profile_count"] != value["after_nested_profile_count"]
 }
 
+fn codebase_diff_has_changes(value: &Value) -> bool {
+    value["manifest_count_changed"].as_bool().unwrap_or(false)
+        || value["task_runner_count_changed"]
+            .as_bool()
+            .unwrap_or(false)
+        || value["entrypoint_count_changed"].as_bool().unwrap_or(false)
+        || value["config_count_changed"].as_bool().unwrap_or(false)
+        || !value["project_kinds_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["project_kinds_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["manifests_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["manifests_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["task_runners_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["task_runners_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["entrypoints_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["entrypoints_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["configs_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["configs_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["recommended_commands_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["recommended_commands_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+}
+
 fn resolve_batch_profile_output_path(
     output_dir: &Path,
     command: &str,
@@ -5420,16 +5579,67 @@ async fn main() -> Result<()> {
             }
             DiscoverAction::Codebase {
                 root,
+                output,
                 compact,
                 pretty,
                 format,
             } => {
                 let root = root.unwrap_or(std::env::current_dir()?);
                 let value = codebase::inspect_codebase(&root, compact)?;
+                if let Some(path) = output.as_ref() {
+                    if let Some(parent) = path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            fs::create_dir_all(parent)?;
+                        }
+                    }
+                    fs::write(path, serde_json::to_string_pretty(&value)?)?;
+                }
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
                     println!("{}", output::format_structured_value(&value, format));
                 } else {
                     print_codebase_discovery_report(&value);
+                }
+            }
+            DiscoverAction::CodebaseDiff {
+                before,
+                after,
+                root,
+                exit_code,
+                pretty,
+                format,
+            } => {
+                let before_value = codebase::load_codebase_snapshot(&before)?;
+                let after_value = if let Some(after_path) = after.as_ref() {
+                    codebase::load_codebase_snapshot(after_path)?
+                } else {
+                    let root = root.unwrap_or(std::env::current_dir()?);
+                    codebase::inspect_codebase(&root, false)?
+                };
+                let value = codebase::diff_codebase_value(&before_value, &after_value);
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    print_codebase_diff_report(&value);
+                }
+                if exit_code && codebase_diff_has_changes(&value) {
+                    std::process::exit(1);
+                }
+            }
+            DiscoverAction::Traffic {
+                source,
+                endpoint,
+                list: _,
+                search,
+                compact,
+                pretty,
+                format,
+            } => {
+                let value =
+                    traffic::inspect_har(&source, endpoint.as_deref(), search.as_deref(), compact)?;
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    print_traffic_discovery_report(&value);
                 }
             }
         },
