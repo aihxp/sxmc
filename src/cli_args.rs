@@ -20,6 +20,13 @@ pub enum DbDiscoveryType {
     Postgres,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum WatchNotificationTemplate {
+    Standard,
+    Compact,
+    Slack,
+}
+
 impl DiffOutputFormat {
     pub fn as_structured(self) -> Option<output::StructuredOutputFormat> {
         match self {
@@ -960,9 +967,21 @@ pub enum Commands {
         #[arg(long = "notify-webhook", value_name = "URL", value_delimiter = ',')]
         notify_webhooks: Vec<String>,
 
+        /// POST Slack-compatible watch notifications to one or more webhook URLs
+        #[arg(
+            long = "notify-slack-webhook",
+            value_name = "URL",
+            value_delimiter = ','
+        )]
+        notify_slack_webhooks: Vec<String>,
+
         /// Extra HTTP header to include with webhook notifications
         #[arg(long = "notify-header", value_name = "K:V")]
         notify_headers: Vec<String>,
+
+        /// Payload template used for file and generic webhook notifications
+        #[arg(long = "notify-template", value_enum, default_value = "standard")]
+        notify_template: WatchNotificationTemplate,
 
         /// Pretty-print JSON output
         #[arg(long)]
@@ -1855,6 +1874,16 @@ pub enum ScaffoldAction {
         #[arg(long)]
         root: Option<PathBuf>,
         #[arg(long, default_value = ".sxmc/discovery-pack")]
+        output_dir: PathBuf,
+        #[arg(long, value_enum, default_value = "preview")]
+        mode: ArtifactMode,
+    },
+    DiscoveryTools {
+        #[arg(long = "from-snapshot")]
+        from_snapshot: PathBuf,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long, default_value = ".sxmc/discovery-tools")]
         output_dir: PathBuf,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,

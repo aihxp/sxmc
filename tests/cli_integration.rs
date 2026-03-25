@@ -1284,6 +1284,70 @@ async fn test_watch_notify_webhook_posts_unhealthy_event() {
     assert_eq!(events[0]["reason"], Value::from("unhealthy"));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_watch_notify_slack_webhook_posts_slack_payload() {
+    let temp = tempfile::tempdir().unwrap();
+    let posted = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = Router::new()
+        .route(
+            "/watch",
+            post(
+                |State(posted): State<Arc<Mutex<Vec<Value>>>>, Json(payload): Json<Value>| async move {
+                    posted.lock().unwrap().push(payload);
+                    Json(json!({"ok": true}))
+                },
+            ),
+        )
+        .with_state(Arc::clone(&posted));
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "bake",
+            "create",
+            "fixture-unhealthy-slack-webhook",
+            "--type",
+            "stdio",
+            "--source",
+            "definitely-not-a-real-command",
+            "--skip-validate",
+        ])
+        .assert()
+        .success();
+
+    sxmc_with_config_home(temp.path())
+        .args([
+            "watch",
+            "--health",
+            "--exit-on-unhealthy",
+            "--notify-slack-webhook",
+            &format!("http://{addr}/watch"),
+            "--format",
+            "ndjson",
+        ])
+        .assert()
+        .failure();
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let events = posted.lock().unwrap().clone();
+    handle.abort();
+
+    assert!(
+        !events.is_empty(),
+        "expected watch slack webhook to receive an event"
+    );
+    assert!(events[0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .contains("sxmc watch"));
+    assert_eq!(events[0]["sxmc_event"]["template"], Value::from("slack"));
+    assert_eq!(events[0]["sxmc_event"]["reason"], Value::from("unhealthy"));
+}
+
 #[test]
 fn test_status_can_compare_hosts() {
     let temp = tempfile::tempdir().unwrap();
@@ -5214,6 +5278,108 @@ fn test_scaffold_discovery_pack_apply_writes_markdown_bundle() {
     assert!(codebase_doc.contains("## Recommended commands"));
     assert!(traffic_doc.contains("# TRAFFIC snapshot: traffic"));
     assert!(traffic_doc.contains("## Endpoint map"));
+}
+
+#[test]
+fn test_scaffold_discovery_tools_apply_writes_json_bundle() {
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot_dir = temp.path().join("snapshots");
+    fs::create_dir_all(&snapshot_dir).unwrap();
+
+    let graphql_snapshot = json!({
+        "discovery_schema": "sxmc_discover_graphql_schema_v1",
+        "source_type": "graphql",
+        "url": "https://example.test/graphql",
+        "operation_count": 2,
+        "type_count": 4,
+        "operations": [
+            {
+                "name": "viewer",
+                "kind": "query",
+                "description": "Fetch the viewer",
+                "arg_count": 0,
+                "returns_composite": true
+            },
+            {
+                "name": "updateUser",
+                "kind": "mutation",
+                "description": "Update a user",
+                "arg_count": 2,
+                "returns_composite": true
+            }
+        ],
+        "types": []
+    });
+    fs::write(
+        snapshot_dir.join("graphql.json"),
+        serde_json::to_string_pretty(&graphql_snapshot).unwrap(),
+    )
+    .unwrap();
+
+    let traffic_snapshot = json!({
+        "discovery_schema": "sxmc_discover_traffic_v1",
+        "source_type": "traffic",
+        "capture_kind": "curl",
+        "source": "curl-history.txt",
+        "request_count": 2,
+        "endpoint_count": 1,
+        "endpoints": [
+            {
+                "key": "POST api.example.test /v1/widgets",
+                "method": "POST",
+                "host": "api.example.test",
+                "path": "/v1/widgets",
+                "count": 2,
+                "status_codes": [200],
+                "content_types": ["application/json"],
+                "sample_url": "https://api.example.test/v1/widgets"
+            }
+        ]
+    });
+    fs::write(
+        snapshot_dir.join("traffic.json"),
+        serde_json::to_string_pretty(&traffic_snapshot).unwrap(),
+    )
+    .unwrap();
+
+    sxmc()
+        .args([
+            "scaffold",
+            "discovery-tools",
+            "--from-snapshot",
+            snapshot_dir.to_str().unwrap(),
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--mode",
+            "apply",
+        ])
+        .assert()
+        .success();
+
+    let tools_dir = temp.path().join(".sxmc/discovery-tools");
+    let index = fs::read_to_string(tools_dir.join("README.md")).unwrap();
+    let graphql_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(tools_dir.join("graphql-graphql.json")).unwrap())
+            .unwrap();
+    let traffic_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(tools_dir.join("traffic-traffic.json")).unwrap())
+            .unwrap();
+
+    assert!(index.contains("# Discovery tools"));
+    assert_eq!(
+        graphql_manifest["scaffold_schema"],
+        Value::from("sxmc_scaffold_discovery_tools_v1")
+    );
+    assert!(graphql_manifest["generated_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["kind"] == "graphql-operation"));
+    assert!(traffic_manifest["generated_tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["kind"] == "traffic-endpoint"));
 }
 
 #[test]

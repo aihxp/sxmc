@@ -32,6 +32,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use cli_args::{
     BakeAction, Cli, Commands, DiffOutputFormat, DiscoverAction, InitAction, InspectAction,
     McpAction, McpSessionAction, McpSessionCli, ScaffoldAction, SkillsAction,
+    WatchNotificationTemplate,
 };
 use command_handlers::{cmd_api, cmd_skills_info, cmd_skills_list, cmd_skills_run};
 use sxmc::auth::secrets::{resolve_header, resolve_secret};
@@ -3796,7 +3797,79 @@ fn watch_event_value(root: &Path, reason: &str, value: &Value) -> Value {
     })
 }
 
-fn append_watch_notification(path: &Path, event: &Value) -> Result<()> {
+fn watch_notification_payload(template: WatchNotificationTemplate, event: &Value) -> Value {
+    let status = &event["status"];
+    let sync_state = &status["sync_state"];
+    let recovery_plan = &status["recovery_plan"];
+    let ai_hosts = status["ai_knowledge"]["hosts"]
+        .as_object()
+        .map(|hosts| hosts.len())
+        .unwrap_or(0);
+
+    let compact = json!({
+        "event_schema": "sxmc_watch_notification_v1",
+        "template": match template {
+            WatchNotificationTemplate::Standard => "standard",
+            WatchNotificationTemplate::Compact => "compact",
+            WatchNotificationTemplate::Slack => "slack",
+        },
+        "reason": event["reason"],
+        "root": event["root"],
+        "observed_at": event["observed_at"],
+        "summary": {
+            "host_count": ai_hosts,
+            "drift_count": sync_state["current_drift_count"].as_u64().unwrap_or(0),
+            "recovery_count": recovery_plan["count"].as_u64().unwrap_or(0),
+            "unhealthy_baked_count": status["baked_health"]["unhealthy_count"].as_u64().unwrap_or(0),
+        },
+        "commands_needing_sync": sync_state["commands_needing_sync"].clone(),
+        "top_recovery_items": recovery_plan["items"]
+            .as_array()
+            .map(|items| items.iter().take(3).cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
+    });
+
+    match template {
+        WatchNotificationTemplate::Standard => event.clone(),
+        WatchNotificationTemplate::Compact => compact,
+        WatchNotificationTemplate::Slack => {
+            let drift_count = compact["summary"]["drift_count"].as_u64().unwrap_or(0);
+            let recovery_count = compact["summary"]["recovery_count"].as_u64().unwrap_or(0);
+            let unhealthy_count = compact["summary"]["unhealthy_baked_count"]
+                .as_u64()
+                .unwrap_or(0);
+            let root = event["root"].as_str().unwrap_or(".");
+            let reason = event["reason"].as_str().unwrap_or("change");
+            let text = format!(
+                "sxmc watch {reason} for {root} — drift: {drift_count}, recovery: {recovery_count}, unhealthy: {unhealthy_count}"
+            );
+            json!({
+                "text": text,
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!("*sxmc watch {}*\n`{}`", reason, root),
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "fields": [
+                            { "type": "mrkdwn", "text": format!("*Drift*\n{}", drift_count) },
+                            { "type": "mrkdwn", "text": format!("*Recovery*\n{}", recovery_count) },
+                            { "type": "mrkdwn", "text": format!("*Unhealthy*\n{}", unhealthy_count) },
+                            { "type": "mrkdwn", "text": format!("*Observed*\n{}", event["observed_at"].as_str().unwrap_or("")) }
+                        ]
+                    }
+                ],
+                "sxmc_event": compact,
+            })
+        }
+    }
+}
+
+fn append_watch_notification(path: &Path, payload: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
@@ -3806,17 +3879,28 @@ fn append_watch_notification(path: &Path, event: &Value) -> Result<()> {
         .create(true)
         .append(true)
         .open(path)?;
-    writeln!(file, "{}", serde_json::to_string(event)?)?;
+    writeln!(file, "{}", serde_json::to_string(payload)?)?;
     Ok(())
 }
 
-fn run_watch_notify_command(command: &str, event: &Value) -> Result<()> {
-    let temp_path = std::env::temp_dir().join(format!(
+fn run_watch_notify_command(
+    command: &str,
+    event: &Value,
+    payload: &Value,
+    template: WatchNotificationTemplate,
+) -> Result<()> {
+    let temp_event_path = std::env::temp_dir().join(format!(
         "sxmc-watch-event-{}-{}.json",
         std::process::id(),
         Utc::now().timestamp_micros()
     ));
-    fs::write(&temp_path, serde_json::to_string_pretty(event)?)?;
+    let temp_payload_path = std::env::temp_dir().join(format!(
+        "sxmc-watch-payload-{}-{}.json",
+        std::process::id(),
+        Utc::now().timestamp_micros()
+    ));
+    fs::write(&temp_event_path, serde_json::to_string_pretty(event)?)?;
+    fs::write(&temp_payload_path, serde_json::to_string_pretty(payload)?)?;
 
     let mut child = if cfg!(windows) {
         let mut cmd = StdCommand::new("cmd");
@@ -3833,14 +3917,24 @@ fn run_watch_notify_command(command: &str, event: &Value) -> Result<()> {
             "SXMC_WATCH_REASON",
             event["reason"].as_str().unwrap_or("change"),
         )
-        .env("SXMC_WATCH_EVENT_PATH", temp_path.as_os_str())
+        .env("SXMC_WATCH_EVENT_PATH", temp_event_path.as_os_str())
+        .env("SXMC_WATCH_PAYLOAD_PATH", temp_payload_path.as_os_str())
         .env("SXMC_WATCH_ROOT", event["root"].as_str().unwrap_or("."));
+    child.env(
+        "SXMC_WATCH_NOTIFY_TEMPLATE",
+        match template {
+            WatchNotificationTemplate::Standard => "standard",
+            WatchNotificationTemplate::Compact => "compact",
+            WatchNotificationTemplate::Slack => "slack",
+        },
+    );
 
     let status = child.status()?;
     if !status.success() {
         eprintln!("[sxmc] Watch notify command exited with status {}", status);
     }
-    let _ = fs::remove_file(temp_path);
+    let _ = fs::remove_file(temp_event_path);
+    let _ = fs::remove_file(temp_payload_path);
     Ok(())
 }
 
@@ -5616,6 +5710,189 @@ fn discovery_pack_output_entries(
     ));
 
     Ok(outputs)
+}
+
+fn discovery_tools_output_entries(
+    from_snapshot: &Path,
+    output_dir: &Path,
+) -> Result<Vec<(String, PathBuf, String)>> {
+    let snapshots = discovery_snapshots::load_snapshot_inputs(from_snapshot)?;
+    let mut outputs = Vec::new();
+    let mut index_lines = vec![
+        "# Discovery tools".to_string(),
+        String::new(),
+        "Generated by `sxmc scaffold discovery-tools` from saved discovery snapshots.".into(),
+        String::new(),
+        "## Generated manifests".into(),
+    ];
+    let mut skipped = Vec::new();
+
+    for entry in snapshots {
+        let source_type = entry.value["source_type"].as_str().unwrap_or("discovery");
+        let stem = entry
+            .path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("snapshot");
+        if let Some((manifest, tool_count)) = discovery_tool_manifest_value(&entry) {
+            let file_name = format!(
+                "{}-{}.json",
+                slugify_label(source_type),
+                slugify_label(stem)
+            );
+            let relative_path = output_dir.join(&file_name);
+            outputs.push((
+                format!("{} discovery tool scaffold", source_type),
+                relative_path,
+                serde_json::to_string_pretty(&manifest)?,
+            ));
+            index_lines.push(format!(
+                "- `{}` — {} tool manifest(s) from [{}]({})",
+                discovery_snapshot_title(&entry),
+                tool_count,
+                file_name,
+                file_name
+            ));
+        } else {
+            skipped.push(format!(
+                "- `{}` — source type `{}` does not yet emit higher-level tool scaffolds",
+                discovery_snapshot_title(&entry),
+                source_type
+            ));
+        }
+    }
+
+    if !skipped.is_empty() {
+        index_lines.push(String::new());
+        index_lines.push("## Skipped snapshots".into());
+        index_lines.extend(skipped);
+    }
+
+    outputs.push((
+        "Discovery tools index".into(),
+        output_dir.join("README.md"),
+        index_lines.join("\n"),
+    ));
+
+    Ok(outputs)
+}
+
+fn discovery_tool_manifest_value(
+    entry: &discovery_snapshots::DiscoverySnapshotEntry,
+) -> Option<(Value, usize)> {
+    let source_type = entry.value["source_type"].as_str().unwrap_or("discovery");
+    let tools = match source_type {
+        "graphql" => graphql_discovery_tool_entries(&entry.value),
+        "database" => database_discovery_tool_entries(&entry.value),
+        "traffic" => traffic_discovery_tool_entries(&entry.value),
+        _ => return None,
+    };
+    let tool_count = tools.len();
+
+    Some((
+        json!({
+            "scaffold_schema": "sxmc_scaffold_discovery_tools_v1",
+            "source_type": source_type,
+            "source_snapshot": entry.path.display().to_string(),
+            "title": discovery_snapshot_title(entry),
+            "tool_count": tool_count,
+            "generated_tools": tools,
+        }),
+        tool_count,
+    ))
+}
+
+fn graphql_discovery_tool_entries(value: &Value) -> Vec<Value> {
+    value["operations"]
+        .as_array()
+        .map(|operations| {
+            operations
+                .iter()
+                .filter_map(|operation| {
+                    let name = operation["name"].as_str()?;
+                    let kind = operation["kind"].as_str().unwrap_or("query");
+                    Some(json!({
+                        "name": format!("graphql-{}-{}", kind, slugify_label(name)),
+                        "kind": "graphql-operation",
+                        "operation_name": name,
+                        "operation_kind": kind,
+                        "description": operation["description"].clone(),
+                        "arg_count": operation["arg_count"].as_u64().unwrap_or(0),
+                        "returns_composite": operation["returns_composite"].as_bool().unwrap_or(false),
+                        "source_url": value["url"].clone(),
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn database_discovery_tool_entries(value: &Value) -> Vec<Value> {
+    let mut tools = vec![json!({
+        "name": "database-list-entries",
+        "kind": "database-browse",
+        "description": format!(
+            "Browse discovered {} schema entries.",
+            value["count"].as_u64().unwrap_or(0)
+        ),
+        "database_type": value["database_type"].clone(),
+        "source": value["source"].clone(),
+    })];
+
+    if let Some(entries) = value["entries"].as_array() {
+        for entry in entries {
+            let qualified_name = entry["qualified_name"]
+                .as_str()
+                .or_else(|| entry["name"].as_str())
+                .unwrap_or("entry");
+            tools.push(json!({
+                "name": format!("database-describe-{}", slugify_label(qualified_name)),
+                "kind": "database-describe",
+                "entry_name": entry["name"].clone(),
+                "qualified_name": entry["qualified_name"].clone(),
+                "object_type": entry["object_type"].clone(),
+                "column_count": entry["column_count"].as_u64().unwrap_or(0),
+                "foreign_key_count": entry["foreign_key_count"].as_u64().unwrap_or(0),
+                "index_count": entry["index_count"].as_u64().unwrap_or(0),
+                "database_type": value["database_type"].clone(),
+            }));
+        }
+    }
+
+    tools
+}
+
+fn traffic_discovery_tool_entries(value: &Value) -> Vec<Value> {
+    value["endpoints"]
+        .as_array()
+        .map(|endpoints| {
+            endpoints
+                .iter()
+                .map(|endpoint| {
+                    let method = endpoint["method"].as_str().unwrap_or("GET");
+                    let host = endpoint["host"].as_str().unwrap_or("unknown-host");
+                    let path = endpoint["path"].as_str().unwrap_or("/");
+                    json!({
+                        "name": format!(
+                            "traffic-{}-{}-{}",
+                            slugify_label(method),
+                            slugify_label(host),
+                            slugify_label(path)
+                        ),
+                        "kind": "traffic-endpoint",
+                        "method": method,
+                        "host": host,
+                        "path": path,
+                        "count": endpoint["count"].as_u64().unwrap_or(0),
+                        "status_codes": endpoint["status_codes"].clone(),
+                        "content_types": endpoint["content_types"].clone(),
+                        "sample_url": endpoint["sample_url"].clone(),
+                        "capture_kind": value["capture_kind"].clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn render_discovery_snapshot_markdown(
@@ -10017,6 +10294,24 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            ScaffoldAction::DiscoveryTools {
+                from_snapshot,
+                root,
+                output_dir,
+                mode,
+            } => {
+                let root = resolve_generation_root(root)?;
+                let outputs = discovery_tools_output_entries(&from_snapshot, &output_dir)?;
+                let outcomes = materialize_text_outputs(&outputs, mode, &root)?;
+                match mode {
+                    ArtifactMode::Preview | ArtifactMode::Patch => {
+                        print_preview_outcomes(&outcomes)
+                    }
+                    ArtifactMode::WriteSidecar | ArtifactMode::Apply => {
+                        print_write_outcomes(&outcomes)
+                    }
+                }
+            }
         },
 
         Commands::Bake { action } => match action {
@@ -10288,7 +10583,9 @@ async fn main() -> Result<()> {
             notify_file,
             notify_command,
             notify_webhooks,
+            notify_slack_webhooks,
             notify_headers,
+            notify_template,
             pretty,
             format,
         } => {
@@ -10311,14 +10608,25 @@ async fn main() -> Result<()> {
                     if should_notify {
                         let reason = if unhealthy { "unhealthy" } else { "change" };
                         let event = watch_event_value(&root, reason, &value);
+                        let payload = watch_notification_payload(notify_template, &event);
                         if let Some(path) = notify_file.as_ref() {
-                            append_watch_notification(path, &event)?;
+                            append_watch_notification(path, &payload)?;
                         }
                         if let Some(command) = notify_command.as_deref() {
-                            run_watch_notify_command(command, &event)?;
+                            run_watch_notify_command(command, &event, &payload, notify_template)?;
                         }
                         for webhook in &notify_webhooks {
-                            send_watch_webhook(webhook, &notify_headers, &event).await?;
+                            send_watch_webhook(webhook, &notify_headers, &payload).await?;
+                        }
+                        if !notify_slack_webhooks.is_empty() {
+                            let slack_payload = watch_notification_payload(
+                                WatchNotificationTemplate::Slack,
+                                &event,
+                            );
+                            for webhook in &notify_slack_webhooks {
+                                send_watch_webhook(webhook, &notify_headers, &slack_payload)
+                                    .await?;
+                            }
                         }
                     }
                     if exit_on_unhealthy && unhealthy {

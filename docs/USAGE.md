@@ -389,6 +389,12 @@ Notes:
 - `sxmc watch --notify-webhook <url>` POSTs those same structured watch events
   as JSON to one or more webhooks, and `--notify-header K:V` adds custom HTTP
   headers for those webhook deliveries.
+- `sxmc watch --notify-template compact` emits a smaller summary payload for
+  file and generic webhook notifications when you want routing-friendly fields
+  without the full nested status frame.
+- `sxmc watch --notify-slack-webhook <url>` sends a Slack-compatible payload
+  with human-readable text, blocks, and the compact Sumac event attached under
+  `sxmc_event`.
 - `sxmc sync --root .` is the preview-first reconciler: it compares saved
   profiles against the installed tools, shows what would change, and suggests
   the exact `--apply` command to run next.
@@ -574,6 +580,9 @@ sxmc init discovery codebase.json --coverage full --host claude-code,cursor --mo
 - `sxmc scaffold discovery-pack --from-snapshot <file-or-dir>` turns saved
   discovery snapshots into a review-friendly Markdown pack with one scaffolded
   doc per snapshot plus a bundle index.
+- `sxmc scaffold discovery-tools --from-snapshot <file-or-dir>` turns saved
+  GraphQL, database, and traffic discovery snapshots into JSON tool manifests
+  that teams can review, adapt, or feed into follow-on wrapper generation.
 - `sxmc sync` is the maintained-state companion to `add` and `setup`: once a
   repo already has saved profiles and host files, `sync` keeps those derived
   artifacts honest as the underlying CLI binaries change.

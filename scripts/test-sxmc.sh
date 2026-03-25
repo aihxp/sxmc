@@ -686,7 +686,9 @@ echo "$watch_help" | grep -q "exit-on-unhealthy" && pass "watch has --exit-on-un
 echo "$watch_help" | grep -q "notify-file" && pass "watch has --notify-file" || fail "watch missing --notify-file"
 echo "$watch_help" | grep -q "notify-command" && pass "watch has --notify-command" || fail "watch missing --notify-command"
 echo "$watch_help" | grep -q "notify-webhook" && pass "watch has --notify-webhook" || fail "watch missing --notify-webhook"
+echo "$watch_help" | grep -q "notify-slack-webhook" && pass "watch has --notify-slack-webhook" || fail "watch missing --notify-slack-webhook"
 echo "$watch_help" | grep -q "notify-header" && pass "watch has --notify-header" || fail "watch missing --notify-header"
+echo "$watch_help" | grep -q "notify-template" && pass "watch has --notify-template" || fail "watch missing --notify-template"
 
 # ── Section 21: Publish / Pull ──
 section "21. Publish / Pull"
@@ -1041,6 +1043,7 @@ section "30. CI Scaffold"
 scaffold_help=$("$SXMC" scaffold --help 2>&1)
 echo "$scaffold_help" | grep -q "ci" && pass "scaffold --help lists ci" || fail "scaffold missing ci"
 echo "$scaffold_help" | grep -q "discovery-pack" && pass "scaffold --help lists discovery-pack" || fail "scaffold missing discovery-pack"
+echo "$scaffold_help" | grep -q "discovery-tools" && pass "scaffold --help lists discovery-tools" || fail "scaffold missing discovery-tools"
 
 if has_cmd git && [ -f "$TMPDIR_TEST/git-profile.json" ]; then
   ci_out=$("$SXMC" scaffold ci --from-profile "$TMPDIR_TEST/git-profile.json" --mode preview 2>&1)
@@ -1065,6 +1068,12 @@ if "$SXMC" discover codebase . --format json-pretty >"$DISCOVERY_PACK_ROOT/snaps
       pass "scaffold discovery-pack writes markdown bundle"
     else
       fail "scaffold discovery-pack" "${discovery_pack_out:0:140}"
+    fi
+    discovery_tools_out=$("$SXMC" scaffold discovery-tools --from-snapshot "$DISCOVERY_PACK_ROOT/snapshots" --root "$DISCOVERY_PACK_ROOT" --mode apply 2>&1 || true)
+    if [ -f "$DISCOVERY_PACK_ROOT/.sxmc/discovery-tools/README.md" ] && [ -f "$DISCOVERY_PACK_ROOT/.sxmc/discovery-tools/traffic-traffic.json" ]; then
+      pass "scaffold discovery-tools writes json bundle"
+    else
+      fail "scaffold discovery-tools" "${discovery_tools_out:0:140}"
     fi
   else
     fail "discover traffic snapshot for scaffold discovery-pack" "traffic snapshot generation failed"

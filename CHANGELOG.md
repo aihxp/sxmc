@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc watch --notify-template standard|compact|slack` now lets maintenance
+  hooks choose between the full watch event, a smaller summary payload, or a
+  Slack-friendly notification body
+- `sxmc watch --notify-slack-webhook <url>` now sends Slack-compatible watch
+  notifications without requiring a custom webhook transformer
+- `sxmc scaffold discovery-tools --from-snapshot <file-or-dir>` now generates
+  higher-level JSON tool manifests from saved GraphQL, database, and traffic
+  discovery snapshots
+
 ## [1.0.3] - 2026-03-25
 
 ### Added

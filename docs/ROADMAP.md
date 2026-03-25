@@ -32,8 +32,9 @@ Candidate work:
   - watch notification hooks for changed/unhealthy frames
   - broader host-aware remediation suggestions
   - webhook delivery for watch events
-- next:
   - richer notification payload templates and destination presets
+- next:
+  - destination-specific presets beyond generic webhooks and Slack
 
 ## Priority 2: Discovery -> Delivery
 
@@ -52,8 +53,9 @@ Candidate work:
   - discover-to-MCP resource generation for saved discovery snapshots served
     through `sxmc serve`
   - discover-driven scaffolds for common team workflows
+  - discovery-tool scaffolds for GraphQL/database/traffic snapshots
 - next:
-  - optional higher-level wrappers for GraphQL/database/traffic snapshots
+  - executable higher-level wrappers built directly from those snapshot manifests
 
 ## Priority 3: Ecosystem Hardening
 
