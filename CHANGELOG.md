@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-03-25
+
 ### Added
 
 - `sxmc serve --discovery-snapshot <file-or-dir>` can now mount saved
