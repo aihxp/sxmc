@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Sumac (sxmc) comprehensive test + benchmark suite
-# Covers: ALL v0.2.10–v0.2.38 features, 10×10×10 matrix, benchmarks
+# Covers: ALL v0.2.10–v0.2.39 features, 10×10×10 matrix, benchmarks
 # Usage: bash scripts/test-sxmc.sh [--json results.json]
 # Env:   SXMC=path/to/sxmc (default: sxmc on PATH, or target/release/sxmc)
 #        BENCH_RUNS=5 (benchmark iterations)

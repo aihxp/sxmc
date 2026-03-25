@@ -15,7 +15,7 @@ If you discover a security vulnerability in Sumac (`sxmc`), please report it res
 
 Instead, use one of the following:
 
-1. **GitHub Private Vulnerability Reporting**: Go to the [Security Advisories](https://github.com/aihxp/sxmc/security/advisories) page and click "Report a vulnerability"
+1. **GitHub Private Vulnerability Reporting**: Go to the [Security Advisories](https://github.com/aihxp/sumac/security/advisories) page and click "Report a vulnerability"
 2. **Email**: Send details to the repository maintainers via the contact information on their GitHub profiles
 
 ### What to include

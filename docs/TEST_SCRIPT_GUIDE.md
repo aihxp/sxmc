@@ -11,7 +11,7 @@
 
 `test-sxmc.sh` is a comprehensive, cross-platform bash test + benchmark suite for Sumac (`sxmc`). It validates every major feature surface — CLI inspection, MCP pipeline, API mode, security scanning, scaffolds, AI host initialization, caching, doctor diagnostics, profile diffing, wrap, status/watch, publish/pull, bundle signing, corpus, registry, trust, and side-by-side comparisons — using only `bash` and `python3`.
 
-The script was developed iteratively across sxmc versions v0.2.10 through v0.2.38, growing from ~50 tests to 250 tests as features were added.
+The script was developed iteratively across sxmc versions v0.2.10 through v0.2.39, growing from ~50 tests to 250 tests as features were added.
 
 ---
 
@@ -125,7 +125,7 @@ Re-validates all features from v0.2.10–v0.2.21:
 | 17. Serve | serve --help, skills list |
 | 18. Wrap (basic) | wrap --help flags |
 
-### Part B — New Features v0.2.22–v0.2.38 (Sections 19–31)
+### Part B — New Features v0.2.22–v0.2.39 (Sections 19–31)
 
 | Section | What it tests |
 |---|---|
@@ -172,7 +172,7 @@ The test script was developed during structured testing sessions across sxmc rel
 3. **v0.2.14–v0.2.16** — Cache management, file-driven batch, doctor check
 4. **v0.2.17–v0.2.21** — Diff engine, completion integration, doctor fix, schema tolerance (136 tests)
 5. **v0.2.22–v0.2.37** — Major rewrite: added Part B (new features), Part C (10x10x10 matrix), Part D (benchmarks). Wrap, status, watch, publish/pull, bundles, signing, corpus, registry, trust, CI scaffold, health gates (247 tests)
-6. **v0.2.38** — Added skills execution depth (--script, --env, --print-body), side-by-side comparisons, MCP tool call tests (250 tests)
+6. **v0.2.38–v0.2.39** — Added skills execution depth (--script, --env, --print-body), side-by-side comparisons, MCP tool call tests, and final metadata-sync cleanup (250 tests)
 
 ### Key debugging lessons
 

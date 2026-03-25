@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 fn env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name).map(PathBuf::from).filter(|p| !p.as_os_str().is_empty())
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
 }
 
 pub fn config_dir() -> PathBuf {
@@ -57,4 +59,3 @@ pub fn cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("sxmc")
 }
-

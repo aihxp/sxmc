@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 - `scripts/test-sxmc.sh` now prefers the repo-local build before any installed
   `sxmc` on `PATH`, avoiding stale-binary false failures during local validation
-- validation docs now point at a published `v0.2.38` report that matches the
+- validation docs now point at a published `v0.2.39` report that matches the
   committed script and current 250-test suite
 - crates.io/npm/Homebrew metadata now point at the renamed GitHub repository:
   `aihxp/sumac`
@@ -672,17 +672,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Tool name extraction for multi-dot filenames
 - API auth flow alignment with CLI docs
 
-[0.1.1]: https://github.com/aihxp/sxmc/compare/v0.1.0...v0.1.1
-[0.1.2]: https://github.com/aihxp/sxmc/compare/v0.1.1...v0.1.2
-[0.1.3]: https://github.com/aihxp/sxmc/compare/v0.1.2...v0.1.3
-[0.1.4]: https://github.com/aihxp/sxmc/compare/v0.1.3...v0.1.4
-[0.1.5]: https://github.com/aihxp/sxmc/compare/v0.1.4...v0.1.5
-[0.1.6]: https://github.com/aihxp/sxmc/compare/v0.1.5...v0.1.6
-[0.1.7]: https://github.com/aihxp/sxmc/compare/v0.1.6...v0.1.7
-[0.1.8]: https://github.com/aihxp/sxmc/compare/v0.1.7...v0.1.8
-[0.1.9]: https://github.com/aihxp/sxmc/compare/v0.1.8...v0.1.9
-[0.2.0]: https://github.com/aihxp/sxmc/compare/v0.1.9...v0.2.0
-[0.2.1]: https://github.com/aihxp/sxmc/compare/v0.2.0...v0.2.1
-[0.2.2]: https://github.com/aihxp/sxmc/compare/v0.2.1...v0.2.2
-[0.2.3]: https://github.com/aihxp/sxmc/compare/v0.2.2...v0.2.3
-[0.1.0]: https://github.com/aihxp/sxmc/releases/tag/v0.1.0
+[0.1.1]: https://github.com/aihxp/sumac/compare/v0.1.0...v0.1.1
+[0.1.2]: https://github.com/aihxp/sumac/compare/v0.1.1...v0.1.2
+[0.1.3]: https://github.com/aihxp/sumac/compare/v0.1.2...v0.1.3
+[0.1.4]: https://github.com/aihxp/sumac/compare/v0.1.3...v0.1.4
+[0.1.5]: https://github.com/aihxp/sumac/compare/v0.1.4...v0.1.5
+[0.1.6]: https://github.com/aihxp/sumac/compare/v0.1.5...v0.1.6
+[0.1.7]: https://github.com/aihxp/sumac/compare/v0.1.6...v0.1.7
+[0.1.8]: https://github.com/aihxp/sumac/compare/v0.1.7...v0.1.8
+[0.1.9]: https://github.com/aihxp/sumac/compare/v0.1.8...v0.1.9
+[0.2.0]: https://github.com/aihxp/sumac/compare/v0.1.9...v0.2.0
+[0.2.1]: https://github.com/aihxp/sumac/compare/v0.2.0...v0.2.1
+[0.2.2]: https://github.com/aihxp/sumac/compare/v0.2.1...v0.2.2
+[0.2.3]: https://github.com/aihxp/sumac/compare/v0.2.2...v0.2.3
+[0.1.0]: https://github.com/aihxp/sumac/releases/tag/v0.1.0
