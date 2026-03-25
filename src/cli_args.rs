@@ -51,6 +51,10 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<PathBuf>>,
 
+        /// Saved discovery snapshot file or directory to expose as MCP resources
+        #[arg(long = "discovery-snapshot", value_delimiter = ',')]
+        discovery_snapshots: Vec<PathBuf>,
+
         /// Watch skill files and reload the in-memory server on change
         #[arg(long)]
         watch: bool,

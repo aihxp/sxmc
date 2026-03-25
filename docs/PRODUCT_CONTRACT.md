@@ -16,6 +16,8 @@ These are the core product paths we should treat as stable:
 ### 1. Skills -> MCP
 
 - `sxmc serve` loads skill directories and exposes them over MCP
+- `sxmc serve --discovery-snapshot <file-or-dir>` exposes saved discovery
+  snapshots as MCP-readable resources
 - per-skill prompts are available when `SKILL.md` is present
 - `scripts/` entries become MCP tools
 - `references/` entries become MCP resources
@@ -56,6 +58,8 @@ These are the core product paths we should treat as stable:
 - `sxmc setup` is supported as the multi-tool onboarding workflow
 - `sxmc init ai --from-cli <command> --client <profile>` is supported for generating startup-facing artifacts
 - `sxmc init ai --from-cli <command> --coverage full` is supported for generating multi-host startup coverage
+- `sxmc init discovery <snapshot-or-dir>` is supported for delivering saved
+  discovery snapshots into startup-facing host docs
 - `sxmc doctor` is supported for startup-file health and repair guidance
 - `sxmc status` is supported as the unified machine-readable host/setup state surface
 - `sxmc sync` is supported as the local reconciliation workflow for saved profiles and AI-host artifacts

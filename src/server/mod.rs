@@ -37,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
+use crate::discovery_snapshots;
 use crate::error::{Result, SxmcError};
 use crate::skills::discovery;
 use crate::skills::parser;
@@ -70,6 +71,7 @@ struct SkillInventorySummary {
     skill_count: usize,
     tool_count: usize,
     resource_count: usize,
+    discovery_resource_count: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -183,12 +185,13 @@ async fn health_handler(info: Arc<HttpServerInfo>) -> Json<serde_json::Value> {
             "skills": inventory.skill_count,
             "tools": inventory.tool_count,
             "resources": inventory.resource_count,
+            "discovery_resources": inventory.discovery_resource_count,
         }
     }))
 }
 
-fn summarize_paths(paths: &[PathBuf]) -> SkillInventorySummary {
-    let Ok(server) = build_server(paths) else {
+fn summarize_inputs(paths: &[PathBuf], discovery_snapshots: &[PathBuf]) -> SkillInventorySummary {
+    let Ok(server) = build_server(paths, discovery_snapshots) else {
         return SkillInventorySummary::default();
     };
 
@@ -196,12 +199,15 @@ fn summarize_paths(paths: &[PathBuf]) -> SkillInventorySummary {
     SkillInventorySummary {
         skill_count: skills.len(),
         tool_count: skills.iter().map(|s| s.scripts.len()).sum(),
-        resource_count: skills.iter().map(|s| s.references.len()).sum(),
+        resource_count: skills.iter().map(|s| s.references.len()).sum::<usize>()
+            + server.discovery_resources().len()
+            + usize::from(!server.discovery_resources().is_empty()),
+        discovery_resource_count: server.discovery_resources().len(),
     }
 }
 
 /// Build a SkillsServer from skill search paths.
-pub fn build_server(paths: &[PathBuf]) -> Result<SkillsServer> {
+pub fn build_server(paths: &[PathBuf], discovery_snapshots: &[PathBuf]) -> Result<SkillsServer> {
     let skill_dirs = discovery::discover_skills(paths)?;
     let mut skills = Vec::new();
 
@@ -218,26 +224,37 @@ pub fn build_server(paths: &[PathBuf]) -> Result<SkillsServer> {
         }
     }
 
+    let discovery_resources = discovery_snapshots::build_resources(discovery_snapshots)?;
+
     eprintln!(
-        "[sxmc] Loaded {} skills with {} tools and {} resources",
+        "[sxmc] Loaded {} skills with {} tools, {} skill resources, and {} discovery resources",
         skills.len(),
         skills.iter().map(|s| s.scripts.len()).sum::<usize>(),
         skills.iter().map(|s| s.references.len()).sum::<usize>(),
+        discovery_resources.len(),
     );
 
-    Ok(SkillsServer::new(skills))
+    Ok(SkillsServer::new_with_resources(
+        skills,
+        discovery_resources,
+    ))
 }
 
 /// Run the MCP server over stdio.
-pub async fn serve_stdio(paths: &[PathBuf], watch: bool) -> Result<()> {
-    let server = ReloadableSkillsServer::new(build_server(paths)?);
+pub async fn serve_stdio(
+    paths: &[PathBuf],
+    discovery_snapshots: &[PathBuf],
+    watch: bool,
+) -> Result<()> {
+    let server = ReloadableSkillsServer::new(build_server(paths, discovery_snapshots)?);
     let cancellation_token = CancellationToken::new();
     if watch {
         eprintln!("[sxmc] Watch mode enabled");
         spawn_watch_task(
             Arc::new(paths.to_vec()),
+            Arc::new(discovery_snapshots.to_vec()),
             server.clone(),
-            Arc::new(RwLock::new(summarize_paths(paths))),
+            Arc::new(RwLock::new(summarize_inputs(paths, discovery_snapshots))),
             cancellation_token.clone(),
         );
     }
@@ -314,8 +331,10 @@ fn build_http_router(
 ///
 /// When `required_headers` is non-empty, every request to `/mcp` must include
 /// all configured header/value pairs.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve_http(
     paths: &[PathBuf],
+    discovery_snapshots: &[PathBuf],
     host: &str,
     port: u16,
     required_headers: &[(String, String)],
@@ -332,12 +351,13 @@ pub async fn serve_http(
         .map_err(|e| crate::error::SxmcError::Other(format!("Failed to read local addr: {e}")))?;
     let cancellation_token = CancellationToken::new();
     let auth = HttpAuthConfig::new(required_headers, bearer_token)?;
-    let inventory = Arc::new(RwLock::new(summarize_paths(paths)));
-    let server = ReloadableSkillsServer::new(build_server(paths)?);
+    let inventory = Arc::new(RwLock::new(summarize_inputs(paths, discovery_snapshots)));
+    let server = ReloadableSkillsServer::new(build_server(paths, discovery_snapshots)?);
     if watch {
         eprintln!("[sxmc] Watch mode enabled");
         spawn_watch_task(
             Arc::new(paths.to_vec()),
+            Arc::new(discovery_snapshots.to_vec()),
             server.clone(),
             inventory.clone(),
             cancellation_token.clone(),
@@ -462,6 +482,7 @@ impl ServerHandler for ReloadableSkillsServer {
 
 fn spawn_watch_task(
     paths: Arc<Vec<PathBuf>>,
+    discovery_snapshots: Arc<Vec<PathBuf>>,
     server: ReloadableSkillsServer,
     inventory: Arc<RwLock<SkillInventorySummary>>,
     cancellation_token: CancellationToken,
@@ -469,6 +490,7 @@ fn spawn_watch_task(
     tokio::spawn(async move {
         if let Err(error) = run_notify_watch_loop(
             paths.clone(),
+            discovery_snapshots.clone(),
             server.clone(),
             inventory.clone(),
             cancellation_token.clone(),
@@ -479,13 +501,21 @@ fn spawn_watch_task(
                 "[sxmc] Watch setup fell back to polling because filesystem events failed: {}",
                 error
             );
-            run_poll_watch_loop(paths, server, inventory, cancellation_token).await;
+            run_poll_watch_loop(
+                paths,
+                discovery_snapshots,
+                server,
+                inventory,
+                cancellation_token,
+            )
+            .await;
         }
     });
 }
 
 async fn run_notify_watch_loop(
     paths: Arc<Vec<PathBuf>>,
+    discovery_snapshots: Arc<Vec<PathBuf>>,
     server: ReloadableSkillsServer,
     inventory: Arc<RwLock<SkillInventorySummary>>,
     cancellation_token: CancellationToken,
@@ -500,9 +530,14 @@ async fn run_notify_watch_loop(
     .map_err(|e| SxmcError::Other(format!("failed to initialize watcher: {}", e)))?;
 
     let mut watched_any = false;
-    for path in paths.iter() {
+    for path in paths.iter().chain(discovery_snapshots.iter()) {
         if path.exists() {
-            watcher.watch(path, RecursiveMode::Recursive).map_err(|e| {
+            let mode = if path.is_dir() {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            watcher.watch(path, mode).map_err(|e| {
                 SxmcError::Other(format!("failed to watch {}: {}", path.display(), e))
             })?;
             watched_any = true;
@@ -515,7 +550,7 @@ async fn run_notify_watch_loop(
         ));
     }
 
-    eprintln!("[sxmc] Watching skill paths with filesystem events");
+    eprintln!("[sxmc] Watching skill paths and discovery snapshots with filesystem events");
 
     loop {
         tokio::select! {
@@ -529,7 +564,12 @@ async fn run_notify_watch_loop(
                     Ok(_event) => {
                         sleep(Duration::from_millis(250)).await;
                         while rx.try_recv().is_ok() {}
-                        reload_skills_from_watch(paths.as_ref(), &server, &inventory);
+                        reload_skills_from_watch(
+                            paths.as_ref(),
+                            discovery_snapshots.as_ref(),
+                            &server,
+                            &inventory,
+                        );
                     }
                     Err(error) => {
                         eprintln!("[sxmc] Watch event error: {}", error);
@@ -545,24 +585,32 @@ async fn run_notify_watch_loop(
 
 async fn run_poll_watch_loop(
     paths: Arc<Vec<PathBuf>>,
+    discovery_snapshots: Arc<Vec<PathBuf>>,
     server: ReloadableSkillsServer,
     inventory: Arc<RwLock<SkillInventorySummary>>,
     cancellation_token: CancellationToken,
 ) {
-    eprintln!("[sxmc] Polling skill paths for changes");
-    let mut last_fingerprint = compute_skill_fingerprint(paths.as_ref());
+    eprintln!("[sxmc] Polling skill paths and discovery snapshots for changes");
+    let mut last_fingerprint =
+        compute_skill_fingerprint(paths.as_ref(), discovery_snapshots.as_ref());
 
     loop {
         tokio::select! {
             _ = cancellation_token.cancelled() => break,
             _ = sleep(Duration::from_secs(1)) => {
-                let current_fingerprint = compute_skill_fingerprint(paths.as_ref());
+                let current_fingerprint =
+                    compute_skill_fingerprint(paths.as_ref(), discovery_snapshots.as_ref());
                 if current_fingerprint == last_fingerprint {
                     continue;
                 }
 
                 last_fingerprint = current_fingerprint;
-                reload_skills_from_watch(paths.as_ref(), &server, &inventory);
+                reload_skills_from_watch(
+                    paths.as_ref(),
+                    discovery_snapshots.as_ref(),
+                    &server,
+                    &inventory,
+                );
             }
         }
     }
@@ -570,11 +618,12 @@ async fn run_poll_watch_loop(
 
 fn reload_skills_from_watch(
     paths: &[PathBuf],
+    discovery_snapshots: &[PathBuf],
     server: &ReloadableSkillsServer,
     inventory: &Arc<RwLock<SkillInventorySummary>>,
 ) {
-    let summary = summarize_paths(paths);
-    match build_server(paths) {
+    let summary = summarize_inputs(paths, discovery_snapshots);
+    match build_server(paths, discovery_snapshots) {
         Ok(next_server) => {
             server.replace(next_server);
             *write_lock(inventory) = summary;
@@ -586,11 +635,18 @@ fn reload_skills_from_watch(
     }
 }
 
-fn compute_skill_fingerprint(paths: &[PathBuf]) -> u64 {
+fn compute_skill_fingerprint(paths: &[PathBuf], discovery_snapshots: &[PathBuf]) -> u64 {
     let mut hasher = DefaultHasher::new();
     paths
         .iter()
+        .chain(discovery_snapshots.iter())
         .for_each(|path| hash_path_state(path, &mut hasher));
+
+    discovery_snapshots.iter().for_each(|path| {
+        if path.is_dir() {
+            hash_directory_files(path, &mut hasher);
+        }
+    });
 
     if let Ok(skill_dirs) = discovery::discover_skills(paths) {
         skill_dirs.iter().for_each(|dir| {
@@ -665,8 +721,8 @@ mod tests {
 
     fn test_http_router(cancel: &CancellationToken, auth: Arc<HttpAuthConfig>) -> Router {
         let paths = vec![PathBuf::from("tests/fixtures")];
-        let inventory = Arc::new(RwLock::new(summarize_paths(&paths)));
-        let server = ReloadableSkillsServer::new(build_server(&paths).unwrap());
+        let inventory = Arc::new(RwLock::new(summarize_inputs(&paths, &[])));
+        let server = ReloadableSkillsServer::new(build_server(&paths, &[]).unwrap());
         build_http_router(
             server,
             cancel.child_token(),
@@ -830,13 +886,13 @@ mod tests {
         .unwrap();
 
         let paths = vec![temp.path().to_path_buf()];
-        let before = compute_skill_fingerprint(&paths);
+        let before = compute_skill_fingerprint(&paths, &[]);
         fs::write(
             skill_dir.join("SKILL.md"),
             "---\nname: watched-skill\ndescription: test\n---\nHello again\n",
         )
         .unwrap();
-        let after = compute_skill_fingerprint(&paths);
+        let after = compute_skill_fingerprint(&paths, &[]);
 
         assert_ne!(before, after);
     }

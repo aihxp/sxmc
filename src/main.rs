@@ -38,6 +38,7 @@ use sxmc::bake::config::SourceType;
 use sxmc::bake::{BakeConfig, BakeStore};
 use sxmc::cli_surfaces::{self, AiClientProfile, AiCoverage, ArtifactMode};
 use sxmc::client::{api, codebase, database, graphql, mcp_http, mcp_stdio, openapi, traffic};
+use sxmc::discovery_snapshots;
 use sxmc::error::Result;
 use sxmc::output;
 use sxmc::security;
@@ -5994,28 +5995,9 @@ fn apply_runtime_registration(
     Ok(())
 }
 
-fn load_discovery_snapshot(path: &Path) -> Result<Value> {
-    let raw = fs::read_to_string(path).map_err(|error| {
-        sxmc::error::SxmcError::Other(format!(
-            "Failed to read discovery snapshot '{}': {}",
-            path.display(),
-            error
-        ))
-    })?;
-    let value: Value = serde_json::from_str(&raw).map_err(|error| {
-        sxmc::error::SxmcError::Other(format!(
-            "Discovery snapshot '{}' is not valid JSON: {}",
-            path.display(),
-            error
-        ))
-    })?;
-    if value["discovery_schema"].is_null() || value["source_type"].is_null() {
-        return Err(sxmc::error::SxmcError::Other(format!(
-            "Discovery snapshot '{}' is missing `discovery_schema` or `source_type`. Save it with `sxmc discover ... --output <file>` first.",
-            path.display()
-        )));
-    }
-    Ok(value)
+fn load_discovery_snapshots(path: &Path) -> Result<Vec<Value>> {
+    discovery_snapshots::load_snapshot_inputs(path)
+        .map(|entries| entries.into_iter().map(|entry| entry.value).collect())
 }
 
 fn discovery_source_type(snapshot: &Value) -> &str {
@@ -6028,7 +6010,7 @@ fn discovery_label(snapshot: &Value) -> String {
             "codebase at {}",
             snapshot["root"].as_str().unwrap_or("<unknown>")
         ),
-        "db" => format!(
+        "db" | "database" => format!(
             "{} database {}",
             snapshot["database_type"].as_str().unwrap_or("unknown"),
             snapshot["source"].as_str().unwrap_or("<unknown>")
@@ -6049,7 +6031,7 @@ fn discovery_label(snapshot: &Value) -> String {
 fn discovery_kind_title(snapshot: &Value) -> &'static str {
     match discovery_source_type(snapshot) {
         "codebase" => "Codebase",
-        "db" => "Database",
+        "db" | "database" => "Database",
         "graphql" => "GraphQL",
         "traffic" => "Traffic",
         _ => "Discovery",
@@ -6105,7 +6087,7 @@ fn discovery_summary_lines(snapshot: &Value) -> Vec<String> {
             }
             lines
         }
-        "db" => {
+        "db" | "database" => {
             let entries = snapshot["entries"]
                 .as_array()
                 .map(|items| {
@@ -6311,7 +6293,7 @@ fn generate_discovery_host_native_agent_doc_artifacts(
 }
 
 fn resolve_discovery_init_artifacts(
-    snapshot: &Value,
+    snapshots: &[Value],
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
     hosts: &[AiClientProfile],
@@ -6323,20 +6305,25 @@ fn resolve_discovery_init_artifacts(
         AiCoverage::Single => {
             let client = require_cli_ai_client(coverage, client)?;
             Ok((
-                vec![generate_discovery_agent_doc_artifact(
-                    snapshot, client, root,
-                )],
+                snapshots
+                    .iter()
+                    .map(|snapshot| generate_discovery_agent_doc_artifact(snapshot, client, root))
+                    .collect(),
                 vec![client],
             ))
         }
         AiCoverage::Full => Ok((
-            std::iter::once(generate_discovery_portable_agent_doc_artifact(
-                snapshot, root,
-            ))
-            .chain(generate_discovery_host_native_agent_doc_artifacts(
-                snapshot, root,
-            ))
-            .collect(),
+            snapshots
+                .iter()
+                .flat_map(|snapshot| {
+                    std::iter::once(generate_discovery_portable_agent_doc_artifact(
+                        snapshot, root,
+                    ))
+                    .chain(
+                        generate_discovery_host_native_agent_doc_artifacts(snapshot, root),
+                    )
+                })
+                .collect(),
             hosts.to_vec(),
         )),
     }
@@ -6798,6 +6785,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Serve {
             paths,
+            discovery_snapshots,
             watch,
             transport,
             port,
@@ -6829,6 +6817,15 @@ async fn main() -> Result<()> {
                     args.push("--paths".into());
                     args.push(search_paths_arg);
                 }
+                if !discovery_snapshots.is_empty() {
+                    let snapshot_arg = discovery_snapshots
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    args.push("--discovery-snapshot".into());
+                    args.push(snapshot_arg);
+                }
                 if watch {
                     args.push("--watch".into());
                 }
@@ -6858,11 +6855,12 @@ async fn main() -> Result<()> {
                             "[sxmc] Warning: remote auth flags are ignored for stdio transport"
                         );
                     }
-                    server::serve_stdio(&search_paths, watch).await?
+                    server::serve_stdio(&search_paths, &discovery_snapshots, watch).await?
                 }
                 "http" | "sse" => {
                     server::serve_http(
                         &search_paths,
+                        &discovery_snapshots,
                         &host,
                         port,
                         &required_headers,
@@ -9320,9 +9318,9 @@ async fn main() -> Result<()> {
                 mode,
             } => {
                 let root = resolve_generation_root(root)?;
-                let snapshot = load_discovery_snapshot(&snapshot)?;
+                let snapshots = load_discovery_snapshots(&snapshot)?;
                 let (artifacts, selected_hosts) = resolve_discovery_init_artifacts(
-                    &snapshot, coverage, client, &hosts, &root, mode,
+                    &snapshots, coverage, client, &hosts, &root, mode,
                 )?;
                 if mode == ArtifactMode::Preview {
                     let outcomes = if coverage == AiCoverage::Full && selected_hosts.is_empty() {

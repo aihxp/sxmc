@@ -69,7 +69,8 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let paths = vec![PathBuf::from("./skills")];
-//!     sxmc::server::serve_stdio(&paths, false).await?;
+//!     let discovery_snapshots = Vec::<PathBuf>::new();
+//!     sxmc::server::serve_stdio(&paths, &discovery_snapshots, false).await?;
 //!     Ok(())
 //! }
 //! ```
@@ -105,6 +106,8 @@ pub mod cache;
 pub mod cli_surfaces;
 /// MCP, OpenAPI, and GraphQL client adapters.
 pub mod client;
+/// Saved discovery snapshot loading and resource helpers.
+pub mod discovery_snapshots;
 /// Shared error types used across the crate.
 pub mod error;
 /// Process execution helpers for script-backed tools.

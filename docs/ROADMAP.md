@@ -26,10 +26,12 @@ Focus areas:
 
 Candidate work:
 
-- tighter `status -> sync -> doctor` recovery loops
-- optional notifications or CI hooks for stale managed artifacts
-- more explicit artifact dependency tracking in local sync state
-- broader host-aware remediation suggestions
+- completed foundation:
+  - tighter `status -> sync -> doctor` recovery loops
+  - explicit local sync state tracking for saved profiles and derived host artifacts
+- next:
+  - optional notifications or CI hooks for stale managed artifacts
+  - broader host-aware remediation suggestions
 
 ## Priority 2: Discovery -> Delivery
 
@@ -43,10 +45,13 @@ Focus areas:
 
 Candidate work:
 
-- richer `init discovery`
-- discover-to-MCP resource generation
-- discover-driven scaffolds for common team workflows
-- optional higher-level wrappers for GraphQL/database/traffic snapshots
+- completed foundation:
+  - richer `init discovery` that accepts one snapshot or a snapshot directory
+  - discover-to-MCP resource generation for saved discovery snapshots served
+    through `sxmc serve`
+- next:
+  - discover-driven scaffolds for common team workflows
+  - optional higher-level wrappers for GraphQL/database/traffic snapshots
 
 ## Priority 3: Ecosystem Hardening
 
@@ -60,9 +65,11 @@ Focus areas:
 
 Candidate work:
 
-- expanded compatibility fixtures and smoke coverage
-- stronger trust and registry workflows for teams
-- safer execution defaults and clearer interactive-surface policy
+- completed foundation:
+  - safer execution defaults and clearer interactive-surface policy
+  - strong trust and registry workflows for local/team distribution
+- next:
+  - expanded compatibility fixtures and smoke coverage
 
 ## Priority 4: Operational Hardening
 
@@ -76,9 +83,11 @@ Focus areas:
 
 Candidate work:
 
-- broaden Linux/Windows real-world fixture coverage
-- reduce documentation sprawl as features stabilize
-- keep stable contracts and release docs tightly aligned
+- completed foundation:
+  - reduced documentation sprawl as features stabilized
+  - kept stable contracts and release docs tightly aligned
+- next:
+  - broaden Linux/Windows real-world fixture coverage
 
 ## What Is Not On This Roadmap
 

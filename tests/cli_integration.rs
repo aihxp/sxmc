@@ -81,6 +81,11 @@ fn wait_for_path(path: &Path) {
     panic!("timed out waiting for {}", path.display());
 }
 
+fn write_discovery_snapshot(path: &Path, value: &Value) -> std::path::PathBuf {
+    fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
+    path.to_path_buf()
+}
+
 fn spawn_http_server(extra_args: &[&str]) -> (Child, u16) {
     let mut child = ProcessCommand::new(sxmc_bin_string())
         .args([
@@ -798,6 +803,111 @@ fn test_wrap_skips_interactive_subcommands_from_stdio_surface() {
     let tools = command_stdout(&["stdio", &spec, "--list-tools"]);
     assert!(tools.contains("status"));
     assert!(!tools.contains("doctor"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_serve_exposes_discovery_snapshots_as_mcp_resources() {
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot = write_discovery_snapshot(
+        &temp.path().join("codebase.json"),
+        &json!({
+            "discovery_schema": "sxmc_discover_codebase_v1",
+            "source_type": "codebase",
+            "root": temp.path().display().to_string(),
+            "project_kinds": ["rust"],
+            "manifest_count": 1,
+            "entrypoint_count": 1,
+            "config_count": 2,
+            "recommended_commands": [{"name": "build", "command": "cargo build"}],
+        }),
+    );
+
+    let spec = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "serve".to_string(),
+        "--discovery-snapshot".to_string(),
+        snapshot.to_string_lossy().into_owned(),
+    ])
+    .unwrap();
+
+    let listed = command_stdout(&["stdio", &spec, "--list-resources"]);
+    assert!(listed.contains("sxmc-discovery://snapshots"));
+
+    let index: Value = serde_json::from_str(&command_stdout(&[
+        "stdio",
+        &spec,
+        "--resource",
+        "sxmc-discovery://snapshots",
+    ]))
+    .unwrap();
+    assert_eq!(index["count"], Value::from(1));
+    assert_eq!(index["entries"][0]["source_type"], Value::from("codebase"));
+
+    let resource_uri = index["entries"][0]["uri"].as_str().unwrap().to_string();
+    let detail: Value = serde_json::from_str(&command_stdout(&[
+        "stdio",
+        &spec,
+        "--resource",
+        &resource_uri,
+    ]))
+    .unwrap();
+    assert_eq!(detail["source_type"], Value::from("codebase"));
+    assert_eq!(detail["manifest_count"], Value::from(1));
+}
+
+#[test]
+fn test_init_discovery_accepts_snapshot_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot_dir = temp.path().join("snapshots");
+    fs::create_dir_all(&snapshot_dir).unwrap();
+
+    write_discovery_snapshot(
+        &snapshot_dir.join("codebase.json"),
+        &json!({
+            "discovery_schema": "sxmc_discover_codebase_v1",
+            "source_type": "codebase",
+            "root": temp.path().display().to_string(),
+            "project_kinds": ["rust"],
+            "manifest_count": 1,
+            "entrypoint_count": 1,
+            "config_count": 2,
+            "recommended_commands": [{"name": "build", "command": "cargo build"}],
+        }),
+    );
+    write_discovery_snapshot(
+        &snapshot_dir.join("graphql.json"),
+        &json!({
+            "discovery_schema": "sxmc_discover_graphql_v1",
+            "source_type": "graphql",
+            "url": "https://api.example.test/graphql",
+            "query_type": "Query",
+            "mutation_type": "Mutation",
+            "operation_count": 2,
+            "type_count": 4,
+            "operations": [
+                {"kind": "query", "name": "viewer", "arg_count": 0}
+            ],
+        }),
+    );
+
+    let root = temp.path().join("repo");
+    fs::create_dir_all(&root).unwrap();
+
+    let _output = command_stdout(&[
+        "init",
+        "discovery",
+        snapshot_dir.to_str().unwrap(),
+        "--client",
+        "claude-code",
+        "--root",
+        root.to_str().unwrap(),
+        "--mode",
+        "apply",
+    ]);
+    let doc = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    assert!(doc.contains("sxmc Discovery Context: codebase"));
+    assert!(doc.contains("sxmc Discovery Context: graphql"));
 }
 
 #[cfg(not(windows))]

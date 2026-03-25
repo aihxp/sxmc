@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc serve --discovery-snapshot <file-or-dir>` can now mount saved
+  discovery snapshots as MCP-readable resources, including an index resource at
+  `sxmc-discovery://snapshots`
+
+### Changed
+
+- `sxmc init discovery <path>` now accepts either a single snapshot file or a
+  directory of saved discovery snapshots and generates host docs for all of
+  them in one pass
+- discovery delivery is now part of the active post-`1.0.0` roadmap instead of
+  only an implied follow-up
+
 ## [1.0.1] - 2026-03-25
 
 ### Changed

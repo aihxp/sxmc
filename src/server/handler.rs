@@ -6,6 +6,7 @@ use rmcp::model::*;
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 
+use crate::discovery_snapshots::DiscoveryResource;
 use crate::executor;
 use crate::skills::models::Skill;
 use crate::skills::parser::parse_argument_hint;
@@ -19,11 +20,26 @@ pub struct SkillsServer {
     skills: Vec<Skill>,
     skill_index: HashMap<String, usize>,
     tool_index: HashMap<String, (usize, usize)>,
-    resource_index: HashMap<String, (usize, usize)>,
+    resource_index: HashMap<String, ResourceLookup>,
+    discovery_resources: Vec<DiscoveryResource>,
+}
+
+#[derive(Clone)]
+enum ResourceLookup {
+    SkillReference(usize, usize),
+    DiscoverySnapshot(usize),
+    DiscoveryIndex,
 }
 
 impl SkillsServer {
     pub fn new(skills: Vec<Skill>) -> Self {
+        Self::new_with_resources(skills, Vec::new())
+    }
+
+    pub fn new_with_resources(
+        skills: Vec<Skill>,
+        discovery_resources: Vec<DiscoveryResource>,
+    ) -> Self {
         let mut skill_index = HashMap::new();
         let mut tool_index = HashMap::new();
         let mut resource_index = HashMap::new();
@@ -37,8 +53,24 @@ impl SkillsServer {
             }
 
             for (ri, reference) in skill.references.iter().enumerate() {
-                resource_index.insert(reference.uri.clone(), (si, ri));
+                resource_index.insert(
+                    reference.uri.clone(),
+                    ResourceLookup::SkillReference(si, ri),
+                );
             }
+        }
+
+        if !discovery_resources.is_empty() {
+            resource_index.insert(
+                "sxmc-discovery://snapshots".into(),
+                ResourceLookup::DiscoveryIndex,
+            );
+        }
+        for (index, resource) in discovery_resources.iter().enumerate() {
+            resource_index.insert(
+                resource.uri.clone(),
+                ResourceLookup::DiscoverySnapshot(index),
+            );
         }
 
         Self {
@@ -46,11 +78,16 @@ impl SkillsServer {
             skill_index,
             tool_index,
             resource_index,
+            discovery_resources,
         }
     }
 
     pub fn skills(&self) -> &[Skill] {
         &self.skills
+    }
+
+    pub fn discovery_resources(&self) -> &[DiscoveryResource] {
+        &self.discovery_resources
     }
 
     fn make_tool_name(skill_name: &str, script_name: &str) -> String {
@@ -430,6 +467,21 @@ impl ServerHandler for SkillsServer {
                     Annotated::new(raw, None)
                 })
             })
+            .chain(self.discovery_resources.iter().map(|resource| {
+                let raw = RawResource::new(resource.uri.clone(), resource.name.clone())
+                    .with_description(resource.description.clone())
+                    .with_mime_type(resource.mime_type.clone());
+                Annotated::new(raw, None)
+            }))
+            .chain((!self.discovery_resources.is_empty()).then(|| {
+                let raw = RawResource::new(
+                    "sxmc-discovery://snapshots".to_string(),
+                    "Mounted discovery snapshot index".to_string(),
+                )
+                .with_description("Index of discovery snapshots exposed through this MCP server.")
+                .with_mime_type("application/json");
+                Annotated::new(raw, None)
+            }))
             .collect();
 
         Ok(ListResourcesResult {
@@ -446,21 +498,50 @@ impl ServerHandler for SkillsServer {
     ) -> Result<ReadResourceResult, McpError> {
         let uri_str = request.uri.as_str();
 
-        let (si, ri) = self.resource_index.get(uri_str).ok_or_else(|| {
+        let lookup = self.resource_index.get(uri_str).ok_or_else(|| {
             McpError::invalid_params(format!("Unknown resource: {}", uri_str), None)
         })?;
 
-        let reference = &self.skills[*si].references[*ri];
-        let content = std::fs::read_to_string(&reference.path).map_err(|e| {
-            McpError::internal_error(
-                format!("Failed to read {}: {}", reference.path.display(), e),
-                None,
-            )
-        })?;
+        match lookup {
+            ResourceLookup::SkillReference(si, ri) => {
+                let reference = &self.skills[*si].references[*ri];
+                let content = std::fs::read_to_string(&reference.path).map_err(|e| {
+                    McpError::internal_error(
+                        format!("Failed to read {}: {}", reference.path.display(), e),
+                        None,
+                    )
+                })?;
 
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            content, uri_str,
-        )]))
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    content, uri_str,
+                )]))
+            }
+            ResourceLookup::DiscoverySnapshot(index) => {
+                let resource = &self.discovery_resources[*index];
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    resource.content.clone(),
+                    uri_str,
+                )]))
+            }
+            ResourceLookup::DiscoveryIndex => {
+                let content = serde_json::to_string_pretty(&serde_json::json!({
+                    "count": self.discovery_resources.len(),
+                    "entries": self.discovery_resources.iter().map(|resource| {
+                        serde_json::json!({
+                            "uri": resource.uri,
+                            "name": resource.name,
+                            "description": resource.description,
+                            "path": resource.path.display().to_string(),
+                            "source_type": resource.source_type,
+                        })
+                    }).collect::<Vec<_>>(),
+                }))
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    content, uri_str,
+                )]))
+            }
+        }
     }
 }
 

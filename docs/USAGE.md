@@ -511,6 +511,7 @@ sxmc sync --root . --apply
 
 sxmc wrap gh --register-host cursor --register-root .
 sxmc serve --paths .claude/skills --register-host claude-code --register-root .
+sxmc serve --paths .claude/skills --discovery-snapshot snapshots/
 
 sxmc init ai --from-cli gh --client claude-code --mode preview
 sxmc init ai --from-cli gh --client cursor --mode preview
@@ -520,6 +521,7 @@ sxmc init ai --from-cli gh --coverage full --host claude-code --mode apply --rem
 
 sxmc discover codebase . --output codebase.json
 sxmc init discovery codebase.json --client claude-code --mode preview
+sxmc init discovery snapshots/ --client claude-code --mode preview
 sxmc init discovery codebase.json --coverage full --host claude-code,cursor --mode apply
 ```
 
@@ -544,10 +546,18 @@ sxmc init discovery codebase.json --coverage full --host claude-code,cursor --mo
   can update host-native MCP client config files automatically, so the wrapped
   or served MCP endpoint is wired into Cursor, Claude Code, and other supported
   hosts without manual JSON edits.
+- `sxmc serve --discovery-snapshot <file-or-dir>` mounts saved discovery
+  snapshots as MCP resources, so codebase/database/GraphQL/traffic discovery
+  can be browsed from MCP clients instead of staying only in JSON files.
+- mounted discovery snapshots always expose an index resource at
+  `sxmc-discovery://snapshots`, with one MCP resource per snapshot beneath it.
 - `sxmc init discovery <snapshot>` bridges saved `discover codebase`, `discover db`,
   `discover graphql`, and `discover traffic` snapshots into startup docs for AI
   hosts, so discovery output can flow into CLAUDE.md/AGENTS.md instead of
   staying stranded as raw JSON.
+- `sxmc init discovery <path>` now accepts either one snapshot file or a
+  directory of saved discovery snapshots when you want to deliver a whole
+  discovery bundle into host docs in one pass.
 - `sxmc sync` is the maintained-state companion to `add` and `setup`: once a
   repo already has saved profiles and host files, `sync` keeps those derived
   artifacts honest as the underlying CLI binaries change.
