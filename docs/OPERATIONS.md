@@ -91,6 +91,21 @@ For the `1.x` line, release notes should distinguish clearly between:
 That keeps Sumac honest: stable where it matters, still improving where
 inference and ecosystem breadth naturally evolve.
 
+## `1.x` Maintenance Discipline
+
+For day-to-day `1.x` work:
+
+- prefer additive changes over breaking rewrites
+- protect the established JSON contracts for:
+  - `sxmc add`
+  - `sxmc setup`
+  - `sxmc doctor`
+  - `sxmc status`
+  - `sxmc sync`
+- treat regressions in the `setup -> add -> status -> sync` lifecycle as
+  top-priority bugs
+- update contract-facing docs when a user-visible workflow changes
+
 ## Distribution
 
 Current distribution channels:

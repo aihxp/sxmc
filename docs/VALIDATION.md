@@ -28,6 +28,8 @@ For `1.x` readiness, also confirm that:
 
 - [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md) still matches the shipped support boundary
 - [STABILITY.md](STABILITY.md) still matches the promised stable workflow and JSON rules
+- the `setup -> add -> status -> sync` lifecycle still behaves as a
+  first-class maintained path, not a best-effort side effect
 
 ## Coverage Summary
 

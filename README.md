@@ -8,6 +8,9 @@ config, MCP wrappers, and reusable discovery artifacts from one Rust binary.
 
 [Crates.io](https://crates.io/crates/sxmc) | [docs.rs](https://docs.rs/sxmc/latest/sxmc/)
 
+Stable `1.x` line: Sumac now treats `setup -> add -> status -> sync` as the
+maintained onboarding and reconciliation loop for day-to-day use.
+
 ## Stable Product Path
 
 If you only learn four commands, learn these:
@@ -176,11 +179,11 @@ sxmc completions bash > ~/.local/share/bash-completion/completions/sxmc
 
 The current validation docs capture the real-world comparison set, token/turn estimates, and hidden retry-cost analysis.
 
-## Stability
+## Stable `1.x`
 
 The product name is **Sumac**. The command stays **`sxmc`**.
 
-The maintained support boundary for the `1.x` line is:
+The maintained support boundary for the stable `1.x` line is:
 
 - stable onboarding and maintenance commands:
   - `sxmc setup`
@@ -196,6 +199,7 @@ See:
 
 - [Product Contract](docs/PRODUCT_CONTRACT.md)
 - [Stability Guide](docs/STABILITY.md)
+- [1.0.0 Announcement](docs/ANNOUNCEMENT_v1.0.0.md)
 
 ## Command Overview
 

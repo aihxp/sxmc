@@ -99,6 +99,28 @@ setup -> add -> status -> sync
 If that loop regresses, it should be treated as a product-level bug, not just a
 feature-specific issue.
 
+## `1.x` Maintenance Discipline
+
+For the stable `1.x` line, maintainers should default to:
+
+- additive changes over destructive ones
+- preserving the established machine-readable shapes for:
+  - `sxmc add`
+  - `sxmc setup`
+  - `sxmc doctor`
+  - `sxmc status`
+  - `sxmc sync`
+- treating regressions in the `setup -> add -> status -> sync` lifecycle as
+  top-priority bugs
+- documenting any user-visible behavior change in the README, product
+  contract, or usage guide before release
+
+In practice that means:
+
+- prefer new fields over renaming or removing existing ones
+- prefer aliases over command/flag churn
+- prefer explicit migration notes over silent behavior changes
+
 ## Release Bar For `1.x`
 
 Before shipping a `1.x` release, we should be able to say:

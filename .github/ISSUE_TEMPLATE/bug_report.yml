@@ -42,6 +42,17 @@ body:
       description: What did you expect to happen?
     validations:
       required: true
+  - type: dropdown
+    id: stable_lifecycle
+    attributes:
+      label: Is this in the stable 1.x lifecycle?
+      description: Choose yes if the bug affects `setup`, `add`, `status`, `sync`, or their generated JSON output.
+      options:
+        - "yes"
+        - "no"
+        - "not sure"
+    validations:
+      required: true
   - type: textarea
     id: output
     attributes:
