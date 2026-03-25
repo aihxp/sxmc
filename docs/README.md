@@ -14,5 +14,5 @@ Additional documentation for Sumac (`sxmc`) developers and maintainers.
 | [CLI_TO_AI_COMPATIBILITY.md](CLI_TO_AI_COMPATIBILITY.md) | Host-by-host `CLI -> AI` coverage matrix for startup docs, native config, and apply behavior |
 | [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md) | Explicit support boundary: what Sumac guarantees, degrades gracefully, or leaves out of scope |
 | [CLI_SURFACES.md](CLI_SURFACES.md) | Shipped `CLI -> AI` model: inspection, host-aware startup artifacts, provenance, depth limits, and review/apply rules |
-| [TEST_SUITE_REPORT_v0.2.39.md](TEST_SUITE_REPORT_v0.2.39.md) | Comprehensive test results for v0.2.39 (250 tests, benchmarks, 10x10x10 matrix) |
+| [TEST_SUITE_REPORT_v0.2.40.md](TEST_SUITE_REPORT_v0.2.40.md) | Comprehensive test results for v0.2.40 (257 tests, benchmarks, 10x10x10 matrix, discovery lifecycle) |
 | [TEST_SCRIPT_GUIDE.md](TEST_SCRIPT_GUIDE.md) | Guide to the test script: architecture, sections, how to run on other platforms |

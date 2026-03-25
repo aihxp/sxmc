@@ -4,7 +4,7 @@ This guide consolidates the release checklist, compatibility notes, smoke
 tests, and benchmark summary.
 
 For the latest validation report, see
-[`TEST_SUITE_REPORT_v0.2.39.md`](TEST_SUITE_REPORT_v0.2.39.md) (250 tests, benchmarks, 10x10x10 matrix).
+[`TEST_SUITE_REPORT_v0.2.40.md`](TEST_SUITE_REPORT_v0.2.40.md) (257 tests, benchmarks, 10x10x10 matrix, discovery lifecycle).
 
 ## What To Run Before A Release
 
@@ -284,7 +284,7 @@ The current validation posture is:
 
 ## Latest maintainer snapshot
 
-**[TEST_SUITE_REPORT_v0.2.39.md](TEST_SUITE_REPORT_v0.2.39.md)** — **0.2.39** pass: 250 tests, 10x10x10 matrix (10 CLIs, 10 skills, 10 MCPs), benchmarks, bundle signing, registry, trust, wrap, status/watch, publish/pull, and side-by-side with/without comparisons.
+**[TEST_SUITE_REPORT_v0.2.40.md](TEST_SUITE_REPORT_v0.2.40.md)** — **0.2.40** pass: 257 tests, 10x10x10 matrix (10 CLIs, 10 skills, 10 MCPs), benchmarks, GraphQL/traffic discovery lifecycle coverage, bundle signing, registry, trust, wrap, status/watch, publish/pull, and side-by-side with/without comparisons.
 
 Repeated standalone **`sxmc stdio …`** invocations do **not** share MCP session memory. For continuity, use **`sxmc mcp session <server>`** (see validation run §9).
 
