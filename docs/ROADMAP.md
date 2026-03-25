@@ -70,7 +70,6 @@ Candidate work:
   - safer execution defaults and clearer interactive-surface policy
   - strong trust and registry workflows for local/team distribution
   - broader compatibility smoke coverage for discovery-delivery workflows
-- next:
   - expanded compatibility fixtures and smoke coverage
 
 ## Priority 4: Operational Hardening
@@ -88,6 +87,8 @@ Candidate work:
 - completed foundation:
   - reduced documentation sprawl as features stabilized
   - kept stable contracts and release docs tightly aligned
+  - portable Linux/macOS/Windows smoke coverage for the stable discovery and
+    delivery path
 - next:
   - broaden Linux/Windows real-world fixture coverage
 

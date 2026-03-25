@@ -60,6 +60,15 @@ jobs:
       - name: Run tests
         run: cargo test --locked --all-targets
 
+      - name: Run portable smoke (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/smoke_portable_core.sh target/debug/sxmc .
+
+      - name: Run portable smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/smoke_portable_core.sh target/debug/sxmc.exe .
+
       - name: Run comprehensive sxmc script (Unix)
         if: runner.os != 'Windows'
         run: SXMC=target/debug/sxmc bash scripts/test-sxmc.sh --json /tmp/sxmc-test-results.json

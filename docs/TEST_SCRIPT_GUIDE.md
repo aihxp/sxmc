@@ -5,6 +5,12 @@
 **Sections:** 41 (4 parts: old features, new features, 10x10x10 matrix, benchmarks)
 **Tests:** 296 in the latest published report
 
+Companion smoke script:
+
+- `scripts/smoke_portable_core.sh` is the smaller cross-platform smoke path for
+  Linux, macOS, and Windows CI. It checks the stable product lifecycle at a
+  much lower cost than the full release-sized shell suite.
+
 ---
 
 ## Overview
@@ -48,6 +54,15 @@ bash scripts/test-sxmc.sh --json /tmp/sxmc-results.json
 ```bash
 SXMC=./target/release/sxmc bash scripts/test-sxmc.sh
 ```
+
+### Portable cross-platform smoke
+
+```bash
+bash scripts/smoke_portable_core.sh target/debug/sxmc .
+```
+
+On Windows CI, the same script runs under Git Bash with
+`target/debug/sxmc.exe`.
 
 ### Binary resolution order
 

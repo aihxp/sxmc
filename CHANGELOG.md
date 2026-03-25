@@ -18,6 +18,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   discovery snapshots
 - `sxmc serve --discovery-tool-manifest <file-or-dir>` now exposes those
   generated discovery-tool manifests as callable MCP tools
+- `scripts/smoke_portable_core.sh` now provides a smaller cross-platform smoke
+  path for the stable discovery-delivery workflow on Linux, macOS, and Windows
+
+### Changed
+
+- `scripts/smoke_test_clients.sh` now exercises discovery-tool manifests over
+  stdio, HTTP, and bearer-protected HTTP smoke paths instead of limiting that
+  coverage to the longer release shell suite
+- CI now runs the portable smoke path on Linux, macOS, and Windows in addition
+  to the existing startup and release-sized validation checks
 
 ## [1.0.3] - 2026-03-25
 

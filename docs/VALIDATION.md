@@ -41,6 +41,7 @@ The maintained product coverage now centers on three layers:
 - automated tests in `cargo test`
 - release certification via `scripts/certify_release.sh`
 - comprehensive CLI/user-path coverage via `scripts/test-sxmc.sh`
+- portable cross-platform smoke via `scripts/smoke_portable_core.sh`
 - optional real-world MCP smoke via `scripts/smoke_real_world_mcps.sh`
 
 High-value scenarios covered in this stack include:
@@ -58,19 +59,24 @@ High-value scenarios covered in this stack include:
 - CLI inspection, startup artifact preview, managed doc apply, and Cursor config merge coverage
 - doctor JSON and human-mode coverage
 - cache statistics, cache invalidation, and batch CLI inspection coverage
+- discovery-tool-manifest serving over stdio and HTTP smoke coverage
+- portable discovery-to-delivery smoke for codebase and traffic snapshots
 
 ## CI Matrix
 
 The repo now validates `sxmc` as a cross-platform product path instead of only a
 Rust crate:
 
-- Ubuntu: `cargo test`, startup smoke, and `scripts/test-sxmc.sh`
-- macOS: `cargo test`, startup smoke, and `scripts/test-sxmc.sh`
-- Windows: `cargo test` plus explicit smoke for `doctor`, compact inspection,
-  and cache-stats JSON output
+- Ubuntu: `cargo test`, startup smoke, `scripts/smoke_portable_core.sh`, and
+  `scripts/test-sxmc.sh`
+- macOS: `cargo test`, startup smoke, `scripts/smoke_portable_core.sh`, and
+  `scripts/test-sxmc.sh`
+- Windows: `cargo test`, `scripts/smoke_portable_core.sh`, plus explicit smoke
+  for `doctor`, compact inspection, and cache-stats JSON output
 
 That keeps the larger Unix-oriented validation script in the loop while still
-exercising Windows-specific command paths in CI.
+exercising Windows-specific command paths in CI, while also giving every OS the
+same smaller discovery-delivery smoke path.
 
 ## Compatibility Notes
 
