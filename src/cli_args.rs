@@ -1388,6 +1388,10 @@ pub enum DiscoverAction {
         /// Show details for a single endpoint key, host, or path
         endpoint: Option<String>,
 
+        /// Write the discovered traffic surface to a JSON snapshot file
+        #[arg(long)]
+        output: Option<PathBuf>,
+
         /// List matching endpoints
         #[arg(long)]
         list: bool,
@@ -1399,6 +1403,34 @@ pub enum DiscoverAction {
         /// Return a compact summary without full endpoint arrays
         #[arg(long)]
         compact: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+
+    /// Compare saved and live traffic discovery snapshots
+    #[command(name = "traffic-diff")]
+    TrafficDiff {
+        /// Saved traffic discovery snapshot
+        #[arg(long)]
+        before: PathBuf,
+
+        /// Optional second snapshot to compare against instead of a live HAR source
+        #[arg(long)]
+        after: Option<PathBuf>,
+
+        /// HAR source to inspect when --after is omitted
+        #[arg(long)]
+        source: Option<PathBuf>,
+
+        /// Exit non-zero when differences are found
+        #[arg(long)]
+        exit_code: bool,
 
         /// Pretty-print JSON output
         #[arg(long)]

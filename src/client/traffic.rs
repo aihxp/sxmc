@@ -158,6 +158,48 @@ pub fn inspect_har(
     }
 }
 
+pub fn load_traffic_snapshot(path: &Path) -> Result<Value> {
+    let contents = fs::read_to_string(path).map_err(|e| {
+        SxmcError::Other(format!(
+            "Failed to read traffic snapshot '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&contents).map_err(|e| {
+        SxmcError::Other(format!(
+            "Traffic snapshot '{}' is not valid JSON: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    if value["discovery_schema"] != "sxmc_discover_traffic_v1" || value["source_type"] != "traffic"
+    {
+        return Err(SxmcError::Other(format!(
+            "Traffic snapshot '{}' is not a valid sxmc traffic discovery artifact.",
+            path.display()
+        )));
+    }
+    Ok(value)
+}
+
+pub fn diff_traffic_value(before: &Value, after: &Value) -> Value {
+    json!({
+        "discovery_schema": "sxmc_discover_traffic_diff_v1",
+        "source_type": "traffic-diff",
+        "before_source": before["source"],
+        "after_source": after["source"],
+        "request_count_changed": before["request_count"] != after["request_count"],
+        "endpoint_count_changed": before["endpoint_count"] != after["endpoint_count"],
+        "endpoints_added": endpoint_key_diff(after["endpoints"].as_array(), before["endpoints"].as_array()),
+        "endpoints_removed": endpoint_key_diff(before["endpoints"].as_array(), after["endpoints"].as_array()),
+        "status_codes_added": endpoint_status_diff(after["endpoints"].as_array(), before["endpoints"].as_array()),
+        "status_codes_removed": endpoint_status_diff(before["endpoints"].as_array(), after["endpoints"].as_array()),
+        "content_types_added": endpoint_content_type_diff(after["endpoints"].as_array(), before["endpoints"].as_array()),
+        "content_types_removed": endpoint_content_type_diff(before["endpoints"].as_array(), after["endpoints"].as_array()),
+    })
+}
+
 struct TrafficEndpointAccumulator {
     key: String,
     method: String,
@@ -182,4 +224,73 @@ impl TrafficEndpointAccumulator {
             "sample_url": self.sample_url,
         })
     }
+}
+
+fn endpoint_key_diff(left: Option<&Vec<Value>>, right: Option<&Vec<Value>>) -> Value {
+    let left = endpoint_key_set(left);
+    let right = endpoint_key_set(right);
+    Value::Array(
+        left.difference(&right)
+            .cloned()
+            .map(Value::String)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn endpoint_status_diff(left: Option<&Vec<Value>>, right: Option<&Vec<Value>>) -> Value {
+    let left = endpoint_nested_set(left, "status_codes");
+    let right = endpoint_nested_set(right, "status_codes");
+    Value::Array(
+        left.difference(&right)
+            .cloned()
+            .map(Value::String)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn endpoint_content_type_diff(left: Option<&Vec<Value>>, right: Option<&Vec<Value>>) -> Value {
+    let left = endpoint_nested_set(left, "content_types");
+    let right = endpoint_nested_set(right, "content_types");
+    Value::Array(
+        left.difference(&right)
+            .cloned()
+            .map(Value::String)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn endpoint_key_set(values: Option<&Vec<Value>>) -> BTreeSet<String> {
+    values
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("key").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn endpoint_nested_set(values: Option<&Vec<Value>>, field: &str) -> BTreeSet<String> {
+    values
+        .map(|items| {
+            let mut entries = BTreeSet::new();
+            for item in items {
+                let key = item["key"].as_str().unwrap_or("<unknown>");
+                if let Some(values) = item[field].as_array() {
+                    for nested in values {
+                        let rendered = if let Some(string) = nested.as_str() {
+                            string.to_string()
+                        } else if let Some(number) = nested.as_u64() {
+                            number.to_string()
+                        } else {
+                            continue;
+                        };
+                        entries.insert(format!("{key}: {rendered}"));
+                    }
+                }
+            }
+            entries
+        })
+        .unwrap_or_default()
 }

@@ -5753,6 +5753,110 @@ fn test_discover_traffic_har_groups_searches_and_compacts() {
         .any(|entry| entry == "GET api.example.com /users"));
 }
 
+#[test]
+fn test_discover_traffic_output_and_diff_report_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let before_har = temp.path().join("before.har");
+    let after_har = temp.path().join("after.har");
+    let snapshot = temp.path().join("traffic-before.json");
+
+    fs::write(
+        &before_har,
+        serde_json::to_string_pretty(&json!({
+            "log": {
+                "version": "1.2",
+                "creator": { "name": "sxmc-test", "version": "1.0" },
+                "entries": [
+                    {
+                        "request": { "method": "GET", "url": "https://api.example.com/users" },
+                        "response": { "status": 200, "content": { "mimeType": "application/json" } }
+                    }
+                ]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &after_har,
+        serde_json::to_string_pretty(&json!({
+            "log": {
+                "version": "1.2",
+                "creator": { "name": "sxmc-test", "version": "1.0" },
+                "entries": [
+                    {
+                        "request": { "method": "GET", "url": "https://api.example.com/users" },
+                        "response": { "status": 200, "content": { "mimeType": "application/json" } }
+                    },
+                    {
+                        "request": { "method": "POST", "url": "https://api.example.com/users" },
+                        "response": { "status": 201, "content": { "mimeType": "application/json" } }
+                    },
+                    {
+                        "request": { "method": "GET", "url": "https://cdn.example.com/app.js" },
+                        "response": { "status": 200, "content": { "mimeType": "application/javascript" } }
+                    }
+                ]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    sxmc()
+        .args([
+            "discover",
+            "traffic",
+            before_har.to_str().unwrap(),
+            "--output",
+            snapshot.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+    assert!(snapshot.exists());
+
+    let diff = command_json(&[
+        "discover",
+        "traffic-diff",
+        "--before",
+        snapshot.to_str().unwrap(),
+        "--source",
+        after_har.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(diff["source_type"], "traffic-diff");
+    assert!(diff["request_count_changed"].as_bool().unwrap_or(false));
+    assert!(diff["endpoint_count_changed"].as_bool().unwrap_or(false));
+    assert!(diff["endpoints_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "POST api.example.com /users"));
+    assert!(diff["content_types_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "GET cdn.example.com /app.js: application/javascript"));
+
+    sxmc()
+        .args([
+            "discover",
+            "traffic-diff",
+            "--before",
+            snapshot.to_str().unwrap(),
+            "--source",
+            after_har.to_str().unwrap(),
+            "--exit-code",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_skills_create_from_local_spec() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
