@@ -869,6 +869,46 @@ pub enum Commands {
         format: Option<output::StructuredOutputFormat>,
     },
 
+    /// Reconcile saved CLI profiles and AI-host artifacts against installed tools
+    Sync {
+        /// Project root to inspect for saved profiles and AI-host artifacts
+        #[arg(long)]
+        root: Option<PathBuf>,
+
+        /// Limit AI artifact refreshes to specific AI hosts
+        #[arg(
+            long = "only",
+            visible_alias = "host",
+            value_enum,
+            value_delimiter = ','
+        )]
+        only_hosts: Vec<AiClientProfile>,
+
+        /// Skills path used when regenerating MCP client config artifacts
+        #[arg(long, default_value = ".claude/skills")]
+        skills_path: PathBuf,
+
+        /// Write updated profiles and AI-host artifacts instead of previewing the plan
+        #[arg(long)]
+        apply: bool,
+
+        /// Exit non-zero when drift or sync errors are detected
+        #[arg(long)]
+        check: bool,
+
+        /// Allow low-confidence CLI profiles to refresh AI-host artifacts
+        #[arg(long)]
+        allow_low_confidence: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
+    },
+
     /// Watch saved-profile drift and environment health over time
     Watch {
         /// Project root to inspect for startup-facing AI files and saved profiles

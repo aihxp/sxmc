@@ -47,6 +47,7 @@ use sxmc::skills::{discovery, generator, parser};
 const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 const PROFILE_CORPUS_SCHEMA: &str = "sxmc_profile_corpus_v1";
 const PROFILE_REGISTRY_SCHEMA: &str = "sxmc_profile_registry_v1";
+const SYNC_STATE_SCHEMA: &str = "sxmc_sync_state_v1";
 const PROFILE_STALE_DAYS: i64 = 30;
 const PROFILE_BUNDLE_SIGNATURE_ALGORITHM: &str = "hmac-sha256";
 const PROFILE_BUNDLE_SIGNATURE_ALGORITHM_ED25519: &str = "ed25519";
@@ -1472,6 +1473,10 @@ fn default_saved_profiles_dir(root: &std::path::Path) -> PathBuf {
     root.join(".sxmc").join("ai").join("profiles")
 }
 
+fn default_sync_state_path(root: &std::path::Path) -> PathBuf {
+    root.join(".sxmc").join("state.json")
+}
+
 fn bundle_slug(input: &str) -> String {
     let mut out = String::new();
     let mut last_sep = false;
@@ -2152,7 +2157,7 @@ fn drift_entry_for_profile(path: &Path, allow_self: bool) -> Value {
         Ok(saved) => match cli_surfaces::inspect_cli_with_depth(
             &saved.command,
             allow_self,
-            saved.provenance.generation_depth as usize,
+            profile_generation_depth(&saved),
         ) {
             Ok(live) => {
                 let diff = cli_surfaces::diff_profile_value(&saved, &live);
@@ -2342,6 +2347,7 @@ fn status_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
                 "inventory": inventory,
             }),
         );
+        object.insert("sync_state".into(), sync_state_summary_value(root, &drift));
     }
     Ok(value)
 }
@@ -3579,7 +3585,7 @@ fn ai_knowledge_value(
     })
 }
 
-fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value) -> Value {
+fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value, sync_state: &Value) -> Value {
     let mut items = Vec::new();
     if let Some(hosts) = ai_knowledge["hosts"].as_object() {
         let mut entries = hosts.iter().collect::<Vec<_>>();
@@ -3603,6 +3609,18 @@ fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value) -> Value {
                 "command": command,
             }));
         }
+    }
+    if sync_state["current_drift_count"].as_u64().unwrap_or(0) > 0 {
+        items.push(json!({
+            "host": Value::Null,
+            "label": "Saved CLI profiles",
+            "state": "sync_needed",
+            "summary": format!(
+                "{} saved profile(s) drifted from the installed tools.",
+                sync_state["current_drift_count"].as_u64().unwrap_or(0)
+            ),
+            "command": format!("sxmc sync --root {} --apply", root.display()),
+        }));
     }
     json!({
         "count": items.len(),
@@ -3838,9 +3856,11 @@ async fn status_value_with_health(
             .unwrap_or_else(|| json!({}));
         let ai_knowledge = ai_knowledge_value(root, only_hosts, &inventory, &drift);
         object.insert("ai_knowledge".into(), ai_knowledge.clone());
+        let sync_state = sync_state_summary_value(root, &drift);
+        object.insert("sync_state".into(), sync_state.clone());
         object.insert(
             "recovery_plan".into(),
-            status_recovery_plan_value(root, &ai_knowledge),
+            status_recovery_plan_value(root, &ai_knowledge, &sync_state),
         );
         if compare_hosts.len() >= 2 {
             object.insert(
@@ -4037,6 +4057,33 @@ fn format_status_report(value: &Value) -> String {
         inventory["unknown_freshness_count"].as_u64().unwrap_or(0),
         inventory["error_count"].as_u64().unwrap_or(0)
     ));
+    let sync_state = &value["sync_state"];
+    lines.push(String::new());
+    lines.push("Local sync state".into());
+    lines.push(format!(
+        "State file: {} ({})",
+        sync_state["path"].as_str().unwrap_or("<unknown>"),
+        if sync_state["present"].as_bool().unwrap_or(false) {
+            "present"
+        } else {
+            "missing"
+        }
+    ));
+    if let Some(last_synced_at) = sync_state["last_synced_at"].as_str() {
+        lines.push(format!("Last synced at: {}", last_synced_at));
+    }
+    lines.push(format!(
+        "Sync drift: {} profile(s) need reconciliation",
+        sync_state["current_drift_count"].as_u64().unwrap_or(0)
+    ));
+    if let Some(commands) = sync_state["commands_needing_sync"].as_array() {
+        if !commands.is_empty() {
+            lines.push("Commands needing sync:".into());
+            for command in commands.iter().filter_map(Value::as_str).take(5) {
+                lines.push(format!("- {}", command));
+            }
+        }
+    }
     if let Some(entries) = drift["entries"].as_array() {
         let changed = entries
             .iter()
@@ -5192,6 +5239,87 @@ fn write_outcome_summary_value(outcomes: &[cli_surfaces::WriteOutcome]) -> Value
     })
 }
 
+fn sync_mode_name(apply: bool) -> &'static str {
+    if apply {
+        "apply"
+    } else {
+        "preview"
+    }
+}
+
+fn profile_sha256(profile: &cli_surfaces::CliSurfaceProfile) -> Result<String> {
+    Ok(sha256_hex(&serde_json::to_vec(profile)?))
+}
+
+fn sync_profile_write_outcome(
+    path: &Path,
+    mode: ArtifactMode,
+    changed: bool,
+) -> cli_surfaces::WriteOutcome {
+    cli_surfaces::WriteOutcome {
+        label: "CLI profile".into(),
+        path: path.to_path_buf(),
+        mode,
+        status: if changed {
+            cli_surfaces::WriteStatus::Updated
+        } else {
+            cli_surfaces::WriteStatus::Skipped
+        },
+    }
+}
+
+fn load_sync_state_value(path: &Path) -> Option<Value> {
+    let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    (value["sync_schema"].as_str() == Some(SYNC_STATE_SCHEMA)).then_some(value)
+}
+
+fn commands_needing_sync(drift: &Value) -> Vec<String> {
+    drift["entries"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|entry| entry["changed"].as_bool().unwrap_or(false))
+                .filter_map(|entry| entry["command"].as_str().map(str::to_string))
+                .take(10)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn sync_state_summary_value(root: &Path, drift: &Value) -> Value {
+    let path = default_sync_state_path(root);
+    let current_drift = drift["changed_count"].as_u64().unwrap_or(0);
+    let commands = commands_needing_sync(drift);
+    if let Some(state) = load_sync_state_value(&path) {
+        json!({
+            "path": path.display().to_string(),
+            "present": true,
+            "sync_schema": state["sync_schema"],
+            "last_synced_at": state["last_synced_at"],
+            "tracked_profile_count": state["profile_count"],
+            "host_count": state["host_count"],
+            "host_ids": state["host_ids"],
+            "last_mode": state["mode"],
+            "current_drift_count": current_drift,
+            "commands_needing_sync": commands,
+        })
+    } else {
+        json!({
+            "path": path.display().to_string(),
+            "present": false,
+            "sync_schema": SYNC_STATE_SCHEMA,
+            "last_synced_at": Value::Null,
+            "tracked_profile_count": 0,
+            "host_count": 0,
+            "host_ids": [],
+            "last_mode": Value::Null,
+            "current_drift_count": current_drift,
+            "commands_needing_sync": commands,
+        })
+    }
+}
+
 struct AddResultContext<'a> {
     root: &'a Path,
     command: &'a str,
@@ -6326,6 +6454,341 @@ fn resolve_cli_ai_client_config_artifacts(
             Ok((artifacts, hosts.to_vec()))
         }
     }
+}
+
+fn profile_generation_depth(profile: &cli_surfaces::CliSurfaceProfile) -> usize {
+    let inferred_depth = profile
+        .subcommand_profiles
+        .iter()
+        .map(profile_generation_depth)
+        .max()
+        .map(|depth| depth + 1)
+        .unwrap_or(0);
+    let recorded_depth = profile.provenance.generation_depth as usize;
+    inferred_depth.max(recorded_depth)
+}
+
+fn profile_command_executable(command: &str) -> String {
+    cli_surfaces::parse_command_spec(command)
+        .ok()
+        .and_then(|parts| parts.first().cloned())
+        .or_else(|| command.split_whitespace().next().map(str::to_string))
+        .unwrap_or_else(|| command.to_string())
+}
+
+fn sync_state_value(
+    root: &Path,
+    hosts: &[AiClientProfile],
+    mode: &str,
+    entries: &[Value],
+) -> Value {
+    json!({
+        "sync_schema": SYNC_STATE_SCHEMA,
+        "root": root.display().to_string(),
+        "profile_dir": default_saved_profiles_dir(root).display().to_string(),
+        "state_path": default_sync_state_path(root).display().to_string(),
+        "last_synced_at": Utc::now().to_rfc3339(),
+        "mode": mode,
+        "profile_count": entries.len(),
+        "host_count": hosts.len(),
+        "host_ids": hosts.iter().copied().map(ai_client_id).collect::<Vec<_>>(),
+        "entries": entries,
+    })
+}
+
+fn sync_saved_profiles_value(
+    root: &Path,
+    only_hosts: &[AiClientProfile],
+    skills_path: &Path,
+    apply: bool,
+    allow_low_confidence: bool,
+) -> Result<Value> {
+    let profile_dir = default_saved_profiles_dir(root);
+    let state_path = default_sync_state_path(root);
+    let selected_hosts = if only_hosts.is_empty() {
+        auto_detect_add_hosts(root)
+    } else {
+        only_hosts.to_vec()
+    };
+    let profile_paths = if profile_dir.exists() {
+        collect_profile_paths(std::slice::from_ref(&profile_dir), true)?
+    } else {
+        Vec::new()
+    };
+    let mode = if apply {
+        ArtifactMode::Apply
+    } else {
+        ArtifactMode::Preview
+    };
+
+    let mut entries = Vec::new();
+    let mut profile_outcomes = Vec::new();
+    let mut artifact_outcomes = Vec::new();
+    let mut state_entries = Vec::new();
+    let mut changed_count = 0usize;
+    let mut unchanged_count = 0usize;
+    let mut blocked_count = 0usize;
+    let mut error_count = 0usize;
+
+    for path in &profile_paths {
+        match cli_surfaces::load_profile(path) {
+            Ok(saved_profile) => {
+                let depth = profile_generation_depth(&saved_profile);
+                let executable = profile_command_executable(&saved_profile.command);
+                let executable_fingerprint = cli_surfaces::executable_fingerprint(&executable);
+                match cli_surfaces::inspect_cli_with_depth(&saved_profile.command, true, depth) {
+                    Ok(refreshed_profile) => {
+                        let diff =
+                            cli_surfaces::diff_profile_value(&saved_profile, &refreshed_profile);
+                        let changed = diff_value_has_changes(&diff);
+                        let quality = refreshed_profile.quality_report();
+                        let ready_for_agent_docs =
+                            quality.ready_for_agent_docs || allow_low_confidence;
+                        let mut state = if changed {
+                            changed_count += 1;
+                            if apply {
+                                "applied"
+                            } else {
+                                "pending"
+                            }
+                        } else {
+                            unchanged_count += 1;
+                            "unchanged"
+                        };
+
+                        let profile_outcome = sync_profile_write_outcome(path, mode, changed);
+                        profile_outcomes.push(profile_outcome.clone());
+
+                        if changed && apply {
+                            if let Some(parent) = path.parent() {
+                                fs::create_dir_all(parent)?;
+                            }
+                            fs::write(path, serde_json::to_string_pretty(&refreshed_profile)?)?;
+                        }
+
+                        let mut artifact_mode = "not_needed";
+                        let mut blocked_reason = Value::Null;
+                        let mut entry_artifact_outcomes = Vec::new();
+                        if changed && !selected_hosts.is_empty() {
+                            if ready_for_agent_docs {
+                                let (mut artifacts, selected_hosts) =
+                                    resolve_cli_ai_init_artifacts(
+                                        &refreshed_profile,
+                                        AiCoverage::Full,
+                                        None,
+                                        &selected_hosts,
+                                        root,
+                                        skills_path,
+                                        ArtifactMode::Apply,
+                                    )?;
+                                artifacts.retain(|artifact| {
+                                    !(artifact.label == "CLI profile"
+                                        && artifact.sidecar_scope == "profiles")
+                                });
+                                entry_artifact_outcomes = if apply {
+                                    cli_surfaces::materialize_artifacts_with_apply_selection(
+                                        &artifacts,
+                                        ArtifactMode::Apply,
+                                        root,
+                                        &selected_hosts,
+                                    )?
+                                } else {
+                                    cli_surfaces::preview_artifacts_with_apply_selection(
+                                        &artifacts,
+                                        ArtifactMode::Apply,
+                                        root,
+                                        &selected_hosts,
+                                    )?
+                                };
+                                artifact_mode = if apply { "applied" } else { "previewed" };
+                            } else {
+                                blocked_count += 1;
+                                state = if apply {
+                                    "applied_profile_only"
+                                } else {
+                                    "pending_profile_only"
+                                };
+                                artifact_mode = "blocked_low_confidence";
+                                blocked_reason = Value::from(
+                                    "Profile quality is below the startup-doc threshold. Re-run with --allow-low-confidence to refresh AI-host artifacts too.",
+                                );
+                            }
+                        }
+
+                        artifact_outcomes.extend(entry_artifact_outcomes.iter().cloned());
+                        let final_profile = if changed {
+                            refreshed_profile.clone()
+                        } else {
+                            saved_profile.clone()
+                        };
+                        state_entries.push(json!({
+                            "command": final_profile.command,
+                            "profile_path": path.display().to_string(),
+                            "generation_depth": depth,
+                            "executable": executable,
+                            "executable_fingerprint": executable_fingerprint,
+                            "profile_sha256": profile_sha256(&final_profile)?,
+                            "generated_at": final_profile.provenance.generated_at,
+                            "quality": {
+                                "ready_for_agent_docs": final_profile.quality_report().ready_for_agent_docs,
+                                "score": final_profile.quality_report().score,
+                                "level": final_profile.quality_report().level,
+                            },
+                            "state": state,
+                        }));
+                        entries.push(json!({
+                            "command": saved_profile.command,
+                            "profile_path": path.display().to_string(),
+                            "generation_depth": depth,
+                            "executable": executable,
+                            "executable_fingerprint": executable_fingerprint,
+                            "changed": changed,
+                            "state": state,
+                            "profile": profile_summary_value(&refreshed_profile),
+                            "diff": diff,
+                            "profile_outcome": {
+                                "label": profile_outcome.label,
+                                "path": profile_outcome.path.display().to_string(),
+                                "mode": artifact_mode_name(profile_outcome.mode),
+                                "status": write_status_name(profile_outcome.status),
+                            },
+                            "artifact_mode": artifact_mode,
+                            "artifact_outcomes": write_outcomes_value(&entry_artifact_outcomes),
+                            "artifact_outcome_summary": write_outcome_summary_value(&entry_artifact_outcomes),
+                            "blocked_reason": blocked_reason,
+                        }));
+                    }
+                    Err(error) => {
+                        error_count += 1;
+                        entries.push(json!({
+                            "command": saved_profile.command,
+                            "profile_path": path.display().to_string(),
+                            "generation_depth": depth,
+                            "executable": executable,
+                            "executable_fingerprint": executable_fingerprint,
+                            "changed": Value::Null,
+                            "state": "error",
+                            "error": error.to_string(),
+                        }));
+                    }
+                }
+            }
+            Err(error) => {
+                error_count += 1;
+                entries.push(json!({
+                    "profile_path": path.display().to_string(),
+                    "state": "error",
+                    "error": error.to_string(),
+                }));
+            }
+        }
+    }
+
+    let state_value =
+        sync_state_value(root, &selected_hosts, sync_mode_name(apply), &state_entries);
+    if apply {
+        if let Some(parent) = state_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&state_path, serde_json::to_string_pretty(&state_value)?)?;
+    }
+
+    Ok(json!({
+        "command": "sync",
+        "root": root.display().to_string(),
+        "mode": sync_mode_name(apply),
+        "state_path": state_path.display().to_string(),
+        "profile_dir": profile_dir.display().to_string(),
+        "host_ids": selected_hosts.iter().copied().map(ai_client_id).collect::<Vec<_>>(),
+        "profile_count": profile_paths.len(),
+        "changed_count": changed_count,
+        "unchanged_count": unchanged_count,
+        "blocked_count": blocked_count,
+        "error_count": error_count,
+        "profile_outcomes": write_outcomes_value(&profile_outcomes),
+        "profile_outcome_summary": write_outcome_summary_value(&profile_outcomes),
+        "artifact_outcomes": write_outcomes_value(&artifact_outcomes),
+        "artifact_outcome_summary": write_outcome_summary_value(&artifact_outcomes),
+        "entries": entries,
+        "sync_state": state_value,
+        "recommended_command": if !apply {
+            Value::from(format!("sxmc sync --root {} --apply", root.display()))
+        } else {
+            Value::Null
+        }
+    }))
+}
+
+fn format_sync_report(value: &Value) -> String {
+    let mut lines = vec![
+        format!("Root: {}", value["root"].as_str().unwrap_or("<unknown>")),
+        format!("Mode: {}", value["mode"].as_str().unwrap_or("preview")),
+        format!(
+            "Saved profiles: {} total, {} changed, {} unchanged, {} blocked, {} errors",
+            value["profile_count"].as_u64().unwrap_or(0),
+            value["changed_count"].as_u64().unwrap_or(0),
+            value["unchanged_count"].as_u64().unwrap_or(0),
+            value["blocked_count"].as_u64().unwrap_or(0),
+            value["error_count"].as_u64().unwrap_or(0),
+        ),
+    ];
+    if let Some(host_ids) = value["host_ids"].as_array() {
+        let labels = host_ids
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "Hosts: {}",
+            if labels.is_empty() {
+                "none".into()
+            } else {
+                labels
+            }
+        ));
+    }
+    if let Some(last_synced_at) = value["sync_state"]["last_synced_at"].as_str() {
+        lines.push(format!("State written: {}", last_synced_at));
+    }
+    if let Some(entries) = value["entries"].as_array() {
+        let changed = entries
+            .iter()
+            .filter(|entry| entry["changed"].as_bool().unwrap_or(false))
+            .take(8)
+            .collect::<Vec<_>>();
+        if !changed.is_empty() {
+            lines.push("Changed commands:".into());
+            for entry in changed {
+                lines.push(format!(
+                    "- {} ({})",
+                    entry["command"].as_str().unwrap_or("<unknown>"),
+                    entry["state"].as_str().unwrap_or("pending")
+                ));
+                if let Some(reason) = entry["blocked_reason"].as_str() {
+                    lines.push(format!("  note: {}", reason));
+                }
+            }
+        }
+        let errors = entries
+            .iter()
+            .filter(|entry| !entry["error"].is_null())
+            .take(5)
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            lines.push("Errors:".into());
+            for entry in errors {
+                lines.push(format!(
+                    "- {}: {}",
+                    entry["command"].as_str().unwrap_or("<unknown>"),
+                    entry["error"].as_str().unwrap_or("unknown error")
+                ));
+            }
+        }
+    }
+    if let Some(command) = value["recommended_command"].as_str() {
+        lines.push(format!("Next: `{}`", command));
+    }
+    lines.join("\n")
 }
 
 #[tokio::main]
@@ -9223,6 +9686,37 @@ async fn main() -> Result<()> {
                 println!("{}", output::format_structured_value(&value, format));
             }
             if exit_code && status_has_unhealthy_baked_health(&value) {
+                std::process::exit(1);
+            }
+        }
+        Commands::Sync {
+            root,
+            only_hosts,
+            skills_path,
+            apply,
+            check,
+            allow_low_confidence,
+            pretty,
+            format,
+        } => {
+            let root = resolve_generation_root(root)?;
+            let value = sync_saved_profiles_value(
+                &root,
+                &only_hosts,
+                &skills_path,
+                apply,
+                allow_low_confidence,
+            )?;
+            if let Some(format) = explicit_structured_format(format, pretty) {
+                println!("{}", output::format_structured_value(&value, format));
+            } else {
+                println!("{}", format_sync_report(&value));
+            }
+            if check
+                && (value["blocked_count"].as_u64().unwrap_or(0) > 0
+                    || value["error_count"].as_u64().unwrap_or(0) > 0
+                    || (!apply && value["changed_count"].as_u64().unwrap_or(0) > 0))
+            {
                 std::process::exit(1);
             }
         }

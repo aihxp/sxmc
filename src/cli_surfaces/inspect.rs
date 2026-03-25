@@ -846,7 +846,7 @@ fn profile_cache_key(parts: &[String], depth: usize) -> String {
     )
 }
 
-fn executable_fingerprint(executable: &str) -> String {
+pub fn executable_fingerprint(executable: &str) -> String {
     let resolved = resolve_executable_path(executable);
     if let Some(path) = resolved {
         let canonical = fs::canonicalize(&path).unwrap_or(path.clone());

@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.44] - 2026-03-25
+
+### Added
+
+- `sxmc sync` as a preview-first local reconciler for saved CLI profiles and
+  generated AI-host artifacts, with `--apply` and `--check` modes for
+  workstation and CI usage
+- local `.sxmc/state.json` tracking for the last applied sync run, including
+  tracked commands, executable fingerprints, profile hashes, and selected host
+  targets
+- validation coverage for `sync` preview/apply behavior in both Rust tests and
+  `scripts/test-sxmc.sh`
+
+### Changed
+
+- `sxmc status` now reports `sync_state`, so the unified machine-readable status
+  surface includes the last local reconciliation timestamp and the current set
+  of commands that still need sync
+- `sxmc status` recovery guidance now suggests `sxmc sync --apply` when saved
+  profiles drift from installed tools
+- drift checks now infer the effective saved-profile inspection depth from the
+  nested saved profile tree instead of only trusting top-level provenance, which
+  avoids false drift after depth-expanded sync/apply flows
+- docs now treat `sxmc sync` as part of the stable onboarding/status contract
+
 ## [0.2.43] - 2026-03-25
 
 ### Changed

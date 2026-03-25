@@ -1153,7 +1153,19 @@ fn test_status_reports_ai_knowledge_and_recovery_for_stale_host() {
             .unwrap_or_default()
             .contains("sxmc inspect drift")
     );
-    assert_eq!(value["recovery_plan"]["count"], Value::from(1));
+    assert!(value["recovery_plan"]["count"].as_u64().unwrap_or(0) >= 1);
+    assert!(value["recovery_plan"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["command"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("sxmc sync")
+            || item["command"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("sxmc inspect drift")));
 }
 
 #[test]
@@ -1237,6 +1249,108 @@ fn test_status_human_report_includes_ai_knowledge_section() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("AI knowledge status"));
     assert!(stdout.contains("Suggested fixes"));
+}
+
+#[test]
+fn test_sync_preview_reports_drift_without_writing_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let profiles_dir = temp.path().join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    let mut profile =
+        command_json_with_config_home(temp.path(), &["inspect", "cli", "git", "--pretty"]);
+    profile["summary"] = Value::from("Outdated git summary");
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+
+    let value = command_json_with_config_home(
+        temp.path(),
+        &["sync", "--root", temp.path().to_str().unwrap(), "--pretty"],
+    );
+    assert_eq!(value["mode"], Value::from("preview"));
+    assert_eq!(value["changed_count"], Value::from(1));
+    assert_eq!(value["entries"][0]["state"], Value::from("pending"));
+    assert_eq!(
+        value["sync_state"]["sync_schema"],
+        Value::from("sxmc_sync_state_v1")
+    );
+    assert!(!temp.path().join(".sxmc").join("state.json").exists());
+
+    let status = command_json_with_config_home(
+        temp.path(),
+        &[
+            "status",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--pretty",
+        ],
+    );
+    assert_eq!(status["sync_state"]["present"], Value::Bool(false));
+    assert_eq!(status["sync_state"]["current_drift_count"], Value::from(1));
+}
+
+#[test]
+fn test_sync_apply_updates_profiles_writes_state_and_clears_drift() {
+    let temp = tempfile::tempdir().unwrap();
+    let profiles_dir = temp.path().join(".sxmc").join("ai").join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    fs::write(temp.path().join("CLAUDE.md"), "# Claude\n").unwrap();
+    let mut profile =
+        command_json_with_config_home(temp.path(), &["inspect", "cli", "git", "--pretty"]);
+    profile["summary"] = Value::from("Outdated git summary");
+    fs::write(
+        profiles_dir.join("git.json"),
+        serde_json::to_string_pretty(&profile).unwrap(),
+    )
+    .unwrap();
+
+    let value = command_json_with_config_home(
+        temp.path(),
+        &[
+            "sync",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--apply",
+            "--pretty",
+        ],
+    );
+    assert_eq!(value["mode"], Value::from("apply"));
+    assert_eq!(value["changed_count"], Value::from(1));
+    assert_eq!(value["entries"][0]["state"], Value::from("applied"));
+    assert!(
+        value["artifact_outcome_summary"]["total"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+
+    let state_path = temp.path().join(".sxmc").join("state.json");
+    assert!(state_path.exists());
+    let state: Value = serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert_eq!(state["sync_schema"], Value::from("sxmc_sync_state_v1"));
+    assert_eq!(state["profile_count"], Value::from(1));
+
+    let refreshed: Value =
+        serde_json::from_str(&fs::read_to_string(profiles_dir.join("git.json")).unwrap()).unwrap();
+    assert_ne!(refreshed["summary"], Value::from("Outdated git summary"));
+
+    let status = command_json_with_config_home(
+        temp.path(),
+        &[
+            "status",
+            "--root",
+            temp.path().to_str().unwrap(),
+            "--pretty",
+        ],
+    );
+    assert_eq!(
+        status["saved_profiles"]["drift"]["changed_count"],
+        Value::from(0)
+    );
+    assert_eq!(status["sync_state"]["present"], Value::Bool(true));
+    assert_eq!(status["sync_state"]["current_drift_count"], Value::from(0));
 }
 
 #[test]

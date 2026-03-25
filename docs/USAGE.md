@@ -237,6 +237,9 @@ sxmc status --host claude-code --format json-pretty
 sxmc status --health --format json-pretty
 sxmc status --health --exit-code
 sxmc status --compare-hosts claude-code,cursor --format json-pretty
+sxmc sync --root .
+sxmc sync --root . --apply
+sxmc sync --root . --check --format json-pretty
 sxmc watch --health --exit-on-unhealthy --format ndjson
 sxmc inspect cli <tool> --depth 1 --format json-pretty
 sxmc inspect cli <tool> --depth 2 --compact --format json-pretty
@@ -323,6 +326,9 @@ Notes:
   startup files or managed snippets for the selected hosts.
 - `sxmc status` extends doctor with saved-profile drift so you can see whether
   `.sxmc/ai/profiles` still matches the currently installed tools.
+- `sxmc status` now also includes `sync_state`, which shows whether a local
+  `.sxmc/state.json` reconciliation record exists, when it last ran, and which
+  commands still need a fresh sync.
 - `sxmc status` also includes saved-profile inventory metadata so you can spot
   stale profiles, freshness gaps, and profiles that are not yet ready for
   startup-doc generation.
@@ -348,6 +354,14 @@ Notes:
   change after the initial frame with `--exit-on-change`.
 - `sxmc watch --health --exit-on-unhealthy` exits on the first observed frame
   with unhealthy baked MCP/API integrations.
+- `sxmc sync --root .` is the preview-first reconciler: it compares saved
+  profiles against the installed tools, shows what would change, and suggests
+  the exact `--apply` command to run next.
+- `sxmc sync --root . --apply` refreshes drifted profiles, rewrites
+  startup-facing AI artifacts for configured hosts, and records the applied
+  state in `.sxmc/state.json`.
+- `sxmc sync --check` is the CI-friendly drift gate for the reconciler: it
+  exits non-zero when saved profiles drifted or when sync hit blocking errors.
 - `sxmc inspect batch ...` keeps partial failures in a `failures` array instead
   of failing the whole run on the first missing command.
 - `sxmc inspect batch ... --parallel N` bounds concurrency for larger batch jobs.
@@ -471,6 +485,7 @@ sxmc add gh --host claude-code,cursor
 sxmc setup --tool git,gh,docker --root .
 sxmc setup --tool git,gh --client claude-code --format json-pretty
 sxmc setup --tool git --host claude-code,cursor --root .
+sxmc sync --root . --apply
 
 sxmc wrap gh --register-host cursor --register-root .
 sxmc serve --paths .claude/skills --register-host claude-code --register-root .
@@ -511,6 +526,9 @@ sxmc init discovery codebase.json --coverage full --host claude-code,cursor --mo
   `discover graphql`, and `discover traffic` snapshots into startup docs for AI
   hosts, so discovery output can flow into CLAUDE.md/AGENTS.md instead of
   staying stranded as raw JSON.
+- `sxmc sync` is the maintained-state companion to `add` and `setup`: once a
+  repo already has saved profiles and host files, `sync` keeps those derived
+  artifacts honest as the underlying CLI binaries change.
 
 Pipeline summary:
 

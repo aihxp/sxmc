@@ -1065,6 +1065,42 @@ else
   fail "status --health --exit-code unexpected exit code $health_ec"
 fi
 
+if has_cmd git; then
+  SYNC_ROOT="$TMPDIR_TEST/sync-root"
+  mkdir -p "$SYNC_ROOT/.sxmc/ai/profiles"
+  "$SXMC" inspect cli git --format json-pretty > "$SYNC_ROOT/.sxmc/ai/profiles/git.json" 2>/dev/null || true
+  python3 - "$SYNC_ROOT/.sxmc/ai/profiles/git.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+data["summary"] = "Outdated git summary"
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+PY
+  sync_preview=$("$SXMC" sync --root "$SYNC_ROOT" --format json-pretty 2>/dev/null || true)
+  if [ -n "$sync_preview" ] && json_check "$sync_preview" "d['changed_count'] == 1 and d['entries'][0]['state'] == 'pending'"; then
+    pass "sync preview reports profile drift"
+  else
+    fail "sync preview reports profile drift" "${sync_preview:0:140}"
+  fi
+
+  echo "# Claude" > "$SYNC_ROOT/CLAUDE.md"
+  sync_apply=$("$SXMC" sync --root "$SYNC_ROOT" --apply --format json-pretty 2>/dev/null || true)
+  if [ -n "$sync_apply" ] && [ -f "$SYNC_ROOT/.sxmc/state.json" ] && json_check "$sync_apply" "d['changed_count'] == 1 and d['entries'][0]['state'] in ('applied','applied_profile_only')"; then
+    pass "sync apply writes state and refreshes profiles"
+  else
+    fail "sync apply writes state and refreshes profiles" "${sync_apply:0:140}"
+  fi
+
+  sync_status=$("$SXMC" status --root "$SYNC_ROOT" --format json-pretty 2>/dev/null || true)
+  if [ -n "$sync_status" ] && json_check "$sync_status" "d['sync_state']['present'] is True and d['sync_state']['current_drift_count'] == 0"; then
+    pass "status reports local sync state"
+  else
+    fail "status reports local sync state" "${sync_status:0:140}"
+  fi
+fi
+
 # ── Section 32: Discovery Lifecycle ──
 section "32. Discovery Lifecycle"
 

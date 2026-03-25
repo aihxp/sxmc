@@ -3,7 +3,7 @@
 **Script:** `scripts/test-sxmc.sh`
 **Lines:** ~1700
 **Sections:** 41 (4 parts: old features, new features, 10x10x10 matrix, benchmarks)
-**Tests:** See the latest validation report
+**Tests:** 296 in the latest published report
 
 ---
 
@@ -11,7 +11,7 @@
 
 `test-sxmc.sh` is a comprehensive, cross-platform bash test + benchmark suite for Sumac (`sxmc`). It validates every major feature surface — CLI inspection, MCP pipeline, API mode, security scanning, scaffolds, AI host initialization, caching, doctor diagnostics, profile diffing, wrap, status/watch, publish/pull, bundle signing, corpus, registry, trust, and side-by-side comparisons — using only `bash` and `python3`.
 
-The script was developed iteratively across sxmc versions v0.2.10 through v0.2.43, growing from ~50 tests to the current release-sized validation suite as features were added.
+The script was developed iteratively across sxmc versions v0.2.10 through v0.2.44, growing from ~50 tests to the current release-sized validation suite as features were added.
 
 ---
 
@@ -125,7 +125,7 @@ Re-validates all features from v0.2.10–v0.2.21:
 | 17. Serve | serve --help, skills list |
 | 18. Wrap (basic) | wrap --help flags |
 
-### Part B — New Features v0.2.22–v0.2.43 (Sections 19–33)
+### Part B — New Features v0.2.22–v0.2.44 (Sections 19–33)
 
 | Section | What it tests |
 |---|---|
@@ -141,7 +141,7 @@ Re-validates all features from v0.2.10–v0.2.21:
 | 28. New Inspect Features | diff --format markdown, migrate-profile, drift, batch --retry-failed |
 | 29. Doctor Enhancements | --remove for cleanup and inferred `doctor --fix` recovery |
 | 30. CI Scaffold | scaffold ci generates GitHub Actions workflows |
-| 31. Health Gates | --health --exit-code returns 0/1 |
+| 31. Health Gates | --health --exit-code returns 0/1 plus local `sync` preview/apply/state coverage |
 | 32. Discovery Lifecycle | GraphQL/traffic lifecycle help, curl history detection, codebase/db/traffic/graphql snapshot and diff coverage |
 | 33. Add Pipeline | one-step and multi-tool onboarding, discovery-to-doc bridging, and wrap/serve MCP auto-registration |
 
@@ -178,6 +178,7 @@ The test script was developed during structured testing sessions across sxmc rel
 7. **v0.2.40** — Added GraphQL/traffic discovery lifecycle coverage plus codebase and database discovery snapshot checks (published report: 257 tests)
 8. **v0.2.41** — Added `discover db --output`, corrected discovery help text, and aligned script numbering/docs with the current 275-test suite
 9. **v0.2.42–v0.2.43** — Added one-step onboarding (`add`, `setup`), discovery-to-doc bridging, MCP auto-registration, stronger `status`/`doctor` recovery flows, interactive/TUI wrap safety, and explicit onboarding/status contract coverage (293 tests)
+10. **v0.2.44** — Added local sync reconciliation (`sxmc sync`), `.sxmc/state.json` state tracking, sync-aware `status`, and shell/Rust coverage for preview/apply/check behavior (296 tests)
 
 ### Key debugging lessons
 
