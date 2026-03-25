@@ -33,8 +33,6 @@ Candidate work:
   - broader host-aware remediation suggestions
   - webhook delivery for watch events
   - richer notification payload templates and destination presets
-- next:
-  - destination-specific presets beyond generic webhooks and Slack
 
 ## Priority 2: Discovery -> Delivery
 
