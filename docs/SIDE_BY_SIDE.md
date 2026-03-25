@@ -99,23 +99,10 @@ sxmc stdio "sxmc serve --paths tests/fixtures" skill_with_scripts__hello
 
 ---
 
-## Full test suite (maintainer)
+## Validation
 
-Run from repo root:
+For the maintained validation story, see:
 
-```bash
-cargo test
-```
-
-On **2026-03-22** (Linux, `sxmc` **0.2.12**), **library + main unit + doc tests passed**; **one integration test** failed locally:
-
-- `test_inspect_cli_python3_avoids_env_vars_as_subcommands` — assertion on `sxmc inspect cli python3` summary containing `"Python"` or `"language"` (likely **environment-specific** to `python3` on PATH).
-
-**Totals:** 102 + 7 + 93 + 1 doc = **203 passed**, **1 failed** in `cli_integration` until that test is fixed or the environment matches CI.
-
----
-
-## Related
-
-- [`USAGE.md`](USAGE.md) — intended workflows  
-- [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md) — what is guaranteed vs out of scope  
+- [`VALIDATION.md`](VALIDATION.md)
+- [`TEST_SUITE_REPORT_v1.0.0.md`](TEST_SUITE_REPORT_v1.0.0.md)
+- [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md)

@@ -6,6 +6,9 @@ tests, and benchmark summary.
 For the latest validation report, see
 [`TEST_SUITE_REPORT_v1.0.0.md`](TEST_SUITE_REPORT_v1.0.0.md) (296 tests, benchmarks, 10x10x10 matrix, discovery lifecycle, onboarding/status contract audit, local sync reconciliation, and the stability/support pass).
 
+For a compact release-by-release record of the pre-`1.0.0` validation milestones,
+see [`VALIDATION_HISTORY.md`](VALIDATION_HISTORY.md).
+
 ## What To Run Before A Release
 
 From the repo root:
