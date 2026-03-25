@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   generated discovery-tool manifests as callable MCP tools
 - `scripts/smoke_portable_core.sh` now provides a smaller cross-platform smoke
   path for the stable discovery-delivery workflow on Linux, macOS, and Windows
+- `scripts/smoke_portable_fixtures.sh` now provides a portable local MCP smoke
+  path for repo fixtures across stdio, baked MCP, hosted HTTP, and
+  bearer-protected HTTP flows
 
 ### Changed
 
@@ -28,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   coverage to the longer release shell suite
 - CI now runs the portable smoke path on Linux, macOS, and Windows in addition
   to the existing startup and release-sized validation checks
+- release certification now includes both portable smoke scripts before the
+  comprehensive shell suite
 
 ## [1.0.3] - 2026-03-25
 

@@ -10,6 +10,9 @@ Companion smoke script:
 - `scripts/smoke_portable_core.sh` is the smaller cross-platform smoke path for
   Linux, macOS, and Windows CI. It checks the stable product lifecycle at a
   much lower cost than the full release-sized shell suite.
+- `scripts/smoke_portable_fixtures.sh` is the portable fixture-based MCP smoke
+  companion. It validates local skill serving and MCP client flows across
+  stdio, baked MCP, hosted HTTP, and bearer-protected HTTP.
 
 ---
 
@@ -63,6 +66,15 @@ bash scripts/smoke_portable_core.sh target/debug/sxmc .
 
 On Windows CI, the same script runs under Git Bash with
 `target/debug/sxmc.exe`.
+
+### Portable fixture MCP smoke
+
+```bash
+bash scripts/smoke_portable_fixtures.sh target/debug/sxmc tests/fixtures
+```
+
+This companion script stays smaller than `test-sxmc.sh` but exercises the
+stable local MCP fixture workflow on every OS.
 
 ### Binary resolution order
 

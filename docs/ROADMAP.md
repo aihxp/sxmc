@@ -89,8 +89,8 @@ Candidate work:
   - kept stable contracts and release docs tightly aligned
   - portable Linux/macOS/Windows smoke coverage for the stable discovery and
     delivery path
-- next:
-  - broaden Linux/Windows real-world fixture coverage
+  - portable Linux/macOS/Windows fixture coverage for local MCP serving, baked
+    MCP, hosted HTTP, and bearer-protected HTTP flows
 
 ## What Is Not On This Roadmap
 

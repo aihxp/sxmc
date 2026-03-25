@@ -69,6 +69,15 @@ jobs:
         shell: bash
         run: bash scripts/smoke_portable_core.sh target/debug/sxmc.exe .
 
+      - name: Run portable fixture smoke (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/smoke_portable_fixtures.sh target/debug/sxmc tests/fixtures
+
+      - name: Run portable fixture smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/smoke_portable_fixtures.sh target/debug/sxmc.exe tests/fixtures
+
       - name: Run comprehensive sxmc script (Unix)
         if: runner.os != 'Windows'
         run: SXMC=target/debug/sxmc bash scripts/test-sxmc.sh --json /tmp/sxmc-test-results.json

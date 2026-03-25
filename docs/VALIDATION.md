@@ -42,6 +42,7 @@ The maintained product coverage now centers on three layers:
 - release certification via `scripts/certify_release.sh`
 - comprehensive CLI/user-path coverage via `scripts/test-sxmc.sh`
 - portable cross-platform smoke via `scripts/smoke_portable_core.sh`
+- portable fixture-based MCP smoke via `scripts/smoke_portable_fixtures.sh`
 - optional real-world MCP smoke via `scripts/smoke_real_world_mcps.sh`
 
 High-value scenarios covered in this stack include:
@@ -61,6 +62,8 @@ High-value scenarios covered in this stack include:
 - cache statistics, cache invalidation, and batch CLI inspection coverage
 - discovery-tool-manifest serving over stdio and HTTP smoke coverage
 - portable discovery-to-delivery smoke for codebase and traffic snapshots
+- portable fixture MCP coverage for stdio, baked MCP, hosted HTTP, and
+  bearer-protected HTTP flows
 
 ## CI Matrix
 
@@ -68,15 +71,16 @@ The repo now validates `sxmc` as a cross-platform product path instead of only a
 Rust crate:
 
 - Ubuntu: `cargo test`, startup smoke, `scripts/smoke_portable_core.sh`, and
-  `scripts/test-sxmc.sh`
+  `scripts/smoke_portable_fixtures.sh`, and `scripts/test-sxmc.sh`
 - macOS: `cargo test`, startup smoke, `scripts/smoke_portable_core.sh`, and
-  `scripts/test-sxmc.sh`
-- Windows: `cargo test`, `scripts/smoke_portable_core.sh`, plus explicit smoke
-  for `doctor`, compact inspection, and cache-stats JSON output
+  `scripts/smoke_portable_fixtures.sh`, and `scripts/test-sxmc.sh`
+- Windows: `cargo test`, `scripts/smoke_portable_core.sh`,
+  `scripts/smoke_portable_fixtures.sh`, plus explicit smoke for `doctor`,
+  compact inspection, and cache-stats JSON output
 
 That keeps the larger Unix-oriented validation script in the loop while still
 exercising Windows-specific command paths in CI, while also giving every OS the
-same smaller discovery-delivery smoke path.
+same smaller discovery-delivery and local fixture MCP smoke paths.
 
 ## Compatibility Notes
 

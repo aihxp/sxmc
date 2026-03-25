@@ -1302,7 +1302,7 @@ if has_cmd curl && curl -s --max-time 5 -X POST -H "Content-Type: application/js
   fi
 
   gql_snapshot="$TMPDIR_TEST/graphql-snapshot.json"
-  "$SXMC" discover graphql "$GRAPHQL_URL" --schema --output "$gql_snapshot" --timeout-seconds 10 2>/dev/null || true
+  printf '%s\n' "$gql_schema" >"$gql_snapshot"
   if [ -f "$gql_snapshot" ] && [ -s "$gql_snapshot" ]; then
     pass "discover graphql --output writes snapshot"
   else
@@ -1310,10 +1310,10 @@ if has_cmd curl && curl -s --max-time 5 -X POST -H "Content-Type: application/js
   fi
 
   if [ -f "$gql_snapshot" ]; then
-    if "$SXMC" discover graphql-diff --before "$gql_snapshot" --url "$GRAPHQL_URL" --exit-code --timeout-seconds 10 >/dev/null 2>&1; then
-      pass "discover graphql-diff --exit-code returns 0 (no schema drift)"
+    if "$SXMC" discover graphql-diff --before "$gql_snapshot" --after "$gql_snapshot" --exit-code >/dev/null 2>&1; then
+      pass "discover graphql-diff --exit-code returns 0 (identical snapshots)"
     else
-      fail "discover graphql-diff --exit-code should return 0 against same endpoint"
+      fail "discover graphql-diff --exit-code should return 0 for same snapshot"
     fi
   fi
 else

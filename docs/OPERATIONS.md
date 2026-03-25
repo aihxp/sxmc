@@ -68,9 +68,12 @@ Release cadence policy:
 Cross-platform release confidence:
 
 - GitHub Actions runs Ubuntu, macOS, and Windows test lanes on `master`
-- Unix CI lanes run `scripts/test-sxmc.sh` against the built debug binary
-- Windows CI validates `doctor`, compact inspection, and cache stats through
-  PowerShell JSON checks in addition to `cargo test`
+- every OS now runs:
+  - `scripts/smoke_portable_core.sh`
+  - `scripts/smoke_portable_fixtures.sh`
+- Unix CI lanes also run `scripts/test-sxmc.sh` against the built debug binary
+- Windows CI still validates `doctor`, compact inspection, and cache stats
+  through PowerShell JSON checks in addition to `cargo test`
 
 ## `1.x` Release Semantics
 
