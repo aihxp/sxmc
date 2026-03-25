@@ -5280,6 +5280,213 @@ async fn test_discover_graphql_local_list_and_call() {
     handle.abort();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_discover_graphql_output_and_diff_report_changes() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let version = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let version_for_server = version.clone();
+
+    let app = Router::new().route(
+        "/graphql",
+        post(move |Json(payload): Json<serde_json::Value>| {
+            let version = version_for_server.clone();
+            async move {
+                let query = payload
+                    .get("query")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let current = version.load(std::sync::atomic::Ordering::SeqCst);
+                if query.contains("__schema") {
+                    if current == 0 {
+                        Json(serde_json::json!({
+                            "data": {
+                                "__schema": {
+                                    "queryType": { "name": "Query" },
+                                    "mutationType": null,
+                                    "types": [
+                                        {
+                                            "kind": "OBJECT",
+                                            "name": "Query",
+                                            "description": "Root queries",
+                                            "fields": [
+                                                {
+                                                    "name": "hello",
+                                                    "description": "Say hello",
+                                                    "args": [],
+                                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                                }
+                                            ],
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        },
+                                        {
+                                            "kind": "SCALAR",
+                                            "name": "String",
+                                            "description": null,
+                                            "fields": null,
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        }
+                                    ],
+                                    "directives": []
+                                }
+                            }
+                        }))
+                    } else {
+                        Json(serde_json::json!({
+                            "data": {
+                                "__schema": {
+                                    "queryType": { "name": "Query" },
+                                    "mutationType": { "name": "Mutation" },
+                                    "types": [
+                                        {
+                                            "kind": "OBJECT",
+                                            "name": "Query",
+                                            "description": "Root queries",
+                                            "fields": [
+                                                {
+                                                    "name": "hello",
+                                                    "description": "Say hello",
+                                                    "args": [],
+                                                    "type": { "kind": "SCALAR", "name": "String", "ofType": null }
+                                                },
+                                                {
+                                                    "name": "status",
+                                                    "description": "Get status",
+                                                    "args": [],
+                                                    "type": { "kind": "ENUM", "name": "Status", "ofType": null }
+                                                }
+                                            ],
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        },
+                                        {
+                                            "kind": "OBJECT",
+                                            "name": "Mutation",
+                                            "description": "Root mutations",
+                                            "fields": [
+                                                {
+                                                    "name": "reset",
+                                                    "description": "Reset state",
+                                                    "args": [],
+                                                    "type": { "kind": "SCALAR", "name": "Boolean", "ofType": null }
+                                                }
+                                            ],
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        },
+                                        {
+                                            "kind": "ENUM",
+                                            "name": "Status",
+                                            "description": null,
+                                            "fields": null,
+                                            "inputFields": null,
+                                            "enumValues": [
+                                                { "name": "OK", "description": null },
+                                                { "name": "DEGRADED", "description": null }
+                                            ]
+                                        },
+                                        {
+                                            "kind": "SCALAR",
+                                            "name": "String",
+                                            "description": null,
+                                            "fields": null,
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        },
+                                        {
+                                            "kind": "SCALAR",
+                                            "name": "Boolean",
+                                            "description": null,
+                                            "fields": null,
+                                            "inputFields": null,
+                                            "enumValues": null
+                                        }
+                                    ],
+                                    "directives": []
+                                }
+                            }
+                        }))
+                    }
+                } else {
+                    Json(serde_json::json!({ "data": { "hello": "world" } }))
+                }
+            }
+        }),
+    );
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let base = format!("http://{addr}/graphql");
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot = temp.path().join("graphql-before.json");
+
+    sxmc()
+        .args([
+            "discover",
+            "graphql",
+            &base,
+            "--schema",
+            "--output",
+            snapshot.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+    assert!(snapshot.exists());
+
+    version.store(1, std::sync::atomic::Ordering::SeqCst);
+
+    let diff = command_json(&[
+        "discover",
+        "graphql-diff",
+        "--before",
+        snapshot.to_str().unwrap(),
+        "--url",
+        &base,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(diff["source_type"], "graphql-diff");
+    assert!(diff["mutation_type_changed"].as_bool().unwrap_or(false));
+    assert!(diff["operation_count_changed"].as_bool().unwrap_or(false));
+    assert!(diff["operations_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "query:status"));
+    assert!(diff["operations_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "mutation:reset"));
+    assert!(diff["types_added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry == "ENUM:Status"));
+
+    sxmc()
+        .args([
+            "discover",
+            "graphql-diff",
+            "--before",
+            snapshot.to_str().unwrap(),
+            "--url",
+            &base,
+            "--exit-code",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+
+    server.abort();
+}
+
 #[test]
 fn test_discover_db_sqlite_lists_tables_and_columns() {
     let temp = tempfile::tempdir().unwrap();
@@ -5855,6 +6062,59 @@ fn test_discover_traffic_output_and_diff_report_changes() {
         ])
         .assert()
         .failure();
+}
+
+#[test]
+fn test_discover_traffic_accepts_curl_command_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let curl_history = temp.path().join("curl-history.txt");
+    fs::write(
+        &curl_history,
+        r#"curl https://api.example.com/users
+curl -X POST -H 'Content-Type: application/json' https://api.example.com/users -d '{"name":"Ada"}'
+curl https://cdn.example.com/assets/app.js
+"#,
+    )
+    .unwrap();
+
+    let value = command_json(&[
+        "discover",
+        "traffic",
+        curl_history.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(value["source_type"], "traffic");
+    assert_eq!(value["capture_kind"], "curl");
+    assert_eq!(value["request_count"], 3);
+    assert_eq!(value["endpoint_count"], 3);
+    assert!(value["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["key"] == "POST api.example.com /users"));
+    assert!(value["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["key"] == "POST api.example.com /users"
+            && entry["content_types"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|content_type| content_type == "application/json")));
+
+    let filtered = command_json(&[
+        "discover",
+        "traffic",
+        curl_history.to_str().unwrap(),
+        "--search",
+        "cdn.example.com",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(filtered["endpoint_count"], 1);
+    assert_eq!(filtered["endpoints"][0]["host"], "cdn.example.com");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

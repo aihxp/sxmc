@@ -433,6 +433,10 @@ pub enum Commands {
         #[arg(long = "type", value_name = "TYPE")]
         type_name: Option<String>,
 
+        /// Write the discovered GraphQL schema summary to a JSON snapshot file
+        #[arg(long)]
+        output: Option<PathBuf>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -1308,6 +1312,10 @@ pub enum DiscoverAction {
         #[arg(long = "type", value_name = "TYPE")]
         type_name: Option<String>,
 
+        /// Write the discovered GraphQL schema summary to a JSON snapshot file
+        #[arg(long)]
+        output: Option<PathBuf>,
+
         /// Pretty-print JSON output
         #[arg(long)]
         pretty: bool,
@@ -1323,6 +1331,42 @@ pub enum DiscoverAction {
         /// Network timeout in seconds
         #[arg(long, value_name = "SECONDS")]
         timeout_seconds: Option<u64>,
+    },
+
+    /// Compare saved and live GraphQL schema snapshots
+    #[command(name = "graphql-diff")]
+    GraphqlDiff {
+        /// Saved GraphQL schema snapshot
+        #[arg(long)]
+        before: PathBuf,
+
+        /// Optional second snapshot to compare against instead of a live URL
+        #[arg(long)]
+        after: Option<PathBuf>,
+
+        /// GraphQL endpoint to inspect when --after is omitted
+        #[arg(long)]
+        url: Option<String>,
+
+        /// HTTP headers (Key:Value) for live introspection
+        #[arg(long = "auth-header", value_name = "K:V")]
+        auth_headers: Vec<String>,
+
+        /// Network timeout in seconds
+        #[arg(long, value_name = "SECONDS")]
+        timeout_seconds: Option<u64>,
+
+        /// Exit non-zero when differences are found
+        #[arg(long)]
+        exit_code: bool,
+
+        /// Pretty-print JSON output
+        #[arg(long)]
+        pretty: bool,
+
+        /// Structured output format
+        #[arg(long, value_enum)]
+        format: Option<output::StructuredOutputFormat>,
     },
 
     /// Discover tables and columns from a SQLite database

@@ -976,6 +976,33 @@ else
   fail "status --health --exit-code unexpected exit code $health_ec"
 fi
 
+# ── Section 32: Discovery Lifecycle ──
+section "32. Discovery Lifecycle"
+
+disc_graphql_help=$("$SXMC" discover graphql --help 2>&1 || true)
+echo "$disc_graphql_help" | grep -q -- "--schema" && pass "discover graphql has --schema" || fail "discover graphql has --schema"
+echo "$disc_graphql_help" | grep -q -- "--output" && pass "discover graphql has --output" || fail "discover graphql has --output"
+
+disc_graphql_diff_help=$("$SXMC" discover graphql-diff --help 2>&1 || true)
+echo "$disc_graphql_diff_help" | grep -q -- "--before" && pass "discover graphql-diff has --before" || fail "discover graphql-diff has --before"
+echo "$disc_graphql_diff_help" | grep -q -- "--url" && pass "discover graphql-diff has --url" || fail "discover graphql-diff has --url"
+
+cat > "$TMPDIR_TEST/curl-history.txt" <<'EOF'
+curl https://api.example.com/users
+curl -X POST -H 'Content-Type: application/json' https://api.example.com/users -d '{"name":"Ada"}'
+EOF
+
+traffic_json=$(sxmc_isolated discover traffic "$TMPDIR_TEST/curl-history.txt" --format json 2>/dev/null || true)
+if [ -n "$traffic_json" ] && json_check "$traffic_json" "d['capture_kind'] == 'curl' and d['endpoint_count'] >= 1"; then
+  pass "discover traffic reads curl history"
+else
+  fail "discover traffic reads curl history"
+fi
+
+disc_traffic_diff_help=$("$SXMC" discover traffic-diff --help 2>&1 || true)
+echo "$disc_traffic_diff_help" | grep -q -- "--before" && pass "discover traffic-diff has --before" || fail "discover traffic-diff has --before"
+echo "$disc_traffic_diff_help" | grep -q -- "--source" && pass "discover traffic-diff has --source" || fail "discover traffic-diff has --source"
+
 # ============================================================================
 # PART C — 10×10×10 MATRIX
 # ============================================================================
@@ -983,8 +1010,8 @@ printf "\n${BOLD}╔════════════════════
 printf "\n${BOLD}║  PART C — 10×10×10 MATRIX             ║${RESET}"
 printf "\n${BOLD}╚════════════════════════════════════════╝${RESET}\n"
 
-# ── Section 32: 10 Known CLIs ──
-section "32. 10 Known CLIs"
+# ── Section 33: 10 Known CLIs ──
+section "33. 10 Known CLIs"
 
 MATRIX_CLIS=(git curl ls ssh tar grep find gh python3 jq)
 CLI_PASS=0; CLI_SKIP_COUNT=0; CLI_FAIL_COUNT=0
@@ -1032,8 +1059,8 @@ done
 
 pass "CLI matrix: $CLI_PASS CLIs fully tested ($CLI_SKIP_COUNT skipped)"
 
-# ── Section 33: 10 Known Skills ──
-section "33. 10 Known Skills"
+# ── Section 34: 10 Known Skills ──
+section "34. 10 Known Skills"
 
 # Create 6 synthetic skills
 SYNTH_SKILLS="$TMPDIR_TEST/synthetic-skills"

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc discover graphql --schema --output <snapshot.json>` and
+  `sxmc discover graphql-diff --before ...` for saved/live GraphQL schema
+  snapshots and drift detection
+- `sxmc discover traffic` now auto-detects both HAR captures and saved
+  `curl`/shell request history, preserving a `capture_kind` field for replayable
+  provenance
+- `sxmc discover traffic --output <snapshot.json>` and
+  `sxmc discover traffic-diff --before ...` for traffic-surface snapshots and
+  drift detection
+
 ## [0.2.39] - 2026-03-24
 
 ### Changed

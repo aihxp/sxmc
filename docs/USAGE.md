@@ -198,6 +198,8 @@ Explicit OpenAPI / GraphQL:
 sxmc spec ./openapi.yaml listPets limit=10
 sxmc graphql https://api.example.com/graphql users limit=5
 sxmc graphql https://api.example.com/graphql --timeout-seconds 15 users limit=5
+sxmc discover graphql https://api.example.com/graphql --schema --output graphql-schema.json --format json-pretty
+sxmc discover graphql-diff --before graphql-schema.json --url https://api.example.com/graphql --format json-pretty
 ```
 
 Network timeout notes:
@@ -205,6 +207,13 @@ Network timeout notes:
 - `sxmc http`, `sxmc api`, `sxmc spec`, and `sxmc graphql` accept `--timeout-seconds`
 - baked HTTP/API/spec/graphql connections can persist a timeout with `sxmc bake create --timeout-seconds ...`
 - if omitted, the underlying client default applies
+- `sxmc discover graphql --schema --output ...` saves a schema-summary snapshot
+  that can later be compared with `sxmc discover graphql-diff --before ...`
+- `sxmc discover traffic capture.har --output traffic.json` snapshots grouped
+  request surfaces from HAR exports, while `sxmc discover traffic curl.log`
+  does the same for saved `curl`/shell history
+- `sxmc discover traffic-diff --before traffic.json --source capture.har`
+  compares a saved traffic snapshot against a new HAR or curl-history source
 
 ## Turn CLIs Into AI Startup Surfaces
 

@@ -285,7 +285,8 @@ fn print_codebase_diff_report(value: &Value) {
 
 fn print_traffic_discovery_report(value: &Value) {
     println!(
-        "Traffic capture: {}",
+        "Traffic capture ({}): {}",
+        value["capture_kind"].as_str().unwrap_or("unknown"),
         value["source"].as_str().unwrap_or("<unknown>")
     );
     println!(
@@ -351,6 +352,55 @@ fn print_traffic_diff_report(value: &Value) {
     print_list("Status codes removed", "status_codes_removed");
     print_list("Content types added", "content_types_added");
     print_list("Content types removed", "content_types_removed");
+}
+
+fn print_graphql_diff_report(value: &Value) {
+    println!(
+        "GraphQL diff: {} -> {}",
+        value["before_url"].as_str().unwrap_or("<unknown>"),
+        value["after_url"].as_str().unwrap_or("<unknown>")
+    );
+    let mut changed_sections = 0u64;
+    for field in [
+        "query_type_changed",
+        "mutation_type_changed",
+        "operation_count_changed",
+        "type_count_changed",
+    ] {
+        if value[field].as_bool().unwrap_or(false) {
+            changed_sections += 1;
+        }
+    }
+    for field in [
+        "operations_added",
+        "operations_removed",
+        "types_added",
+        "types_removed",
+    ] {
+        if value[field]
+            .as_array()
+            .map(|items| !items.is_empty())
+            .unwrap_or(false)
+        {
+            changed_sections += 1;
+        }
+    }
+    println!("Changed sections: {changed_sections}");
+
+    let print_list = |label: &str, field: &str| {
+        if let Some(items) = value[field].as_array() {
+            if !items.is_empty() {
+                println!("{label}:");
+                for item in items {
+                    println!("  - {}", item.as_str().unwrap_or("<unknown>"));
+                }
+            }
+        }
+    };
+    print_list("Operations added", "operations_added");
+    print_list("Operations removed", "operations_removed");
+    print_list("Types added", "types_added");
+    print_list("Types removed", "types_removed");
 }
 
 enum ConnectedMcpClient {
@@ -4323,6 +4373,29 @@ fn traffic_diff_has_changes(value: &Value) -> bool {
             .unwrap_or(true)
 }
 
+fn graphql_diff_has_changes(value: &Value) -> bool {
+    value["query_type_changed"].as_bool().unwrap_or(false)
+        || value["mutation_type_changed"].as_bool().unwrap_or(false)
+        || value["operation_count_changed"].as_bool().unwrap_or(false)
+        || value["type_count_changed"].as_bool().unwrap_or(false)
+        || !value["operations_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["operations_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["types_added"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+        || !value["types_removed"]
+            .as_array()
+            .map(|items| items.is_empty())
+            .unwrap_or(true)
+}
+
 fn resolve_batch_profile_output_path(
     output_dir: &Path,
     command: &str,
@@ -5573,6 +5646,7 @@ async fn main() -> Result<()> {
                 search,
                 schema,
                 type_name,
+                output,
                 pretty,
                 format,
                 auth_headers,
@@ -5584,6 +5658,14 @@ async fn main() -> Result<()> {
                         .await?;
                 if schema {
                     let value = gql.schema_summary_value(search.as_deref());
+                    if let Some(path) = output.as_ref() {
+                        if let Some(parent) = path.parent() {
+                            if !parent.as_os_str().is_empty() {
+                                fs::create_dir_all(parent)?;
+                            }
+                        }
+                        fs::write(path, serde_json::to_string_pretty(&value)?)?;
+                    }
                     if let Some(format) = output::prefer_structured_output(format, pretty) {
                         println!("{}", output::format_structured_value(&value, format));
                     } else {
@@ -5626,6 +5708,44 @@ async fn main() -> Result<()> {
                         format,
                     )
                     .await?;
+                }
+            }
+            DiscoverAction::GraphqlDiff {
+                before,
+                after,
+                url,
+                auth_headers,
+                timeout_seconds,
+                exit_code,
+                pretty,
+                format,
+            } => {
+                let before_value = graphql::load_graphql_schema_snapshot(&before)?;
+                let after_value = if let Some(after_path) = after.as_ref() {
+                    graphql::load_graphql_schema_snapshot(after_path)?
+                } else {
+                    let url = url.ok_or_else(|| {
+                        sxmc::error::SxmcError::Other(
+                            "discover graphql-diff requires either --after <snapshot.json> or --url <endpoint>".into(),
+                        )
+                    })?;
+                    let headers = parse_headers(&auth_headers)?;
+                    let gql = graphql::GraphQLClient::connect(
+                        &url,
+                        &headers,
+                        parse_timeout(timeout_seconds),
+                    )
+                    .await?;
+                    gql.schema_summary_value(None)
+                };
+                let value = graphql::diff_graphql_schema_value(&before_value, &after_value);
+                if let Some(format) = output::prefer_structured_output(format, pretty) {
+                    println!("{}", output::format_structured_value(&value, format));
+                } else {
+                    print_graphql_diff_report(&value);
+                }
+                if exit_code && graphql_diff_has_changes(&value) {
+                    std::process::exit(1);
                 }
             }
             DiscoverAction::Db {
@@ -5713,8 +5833,12 @@ async fn main() -> Result<()> {
                 pretty,
                 format,
             } => {
-                let value =
-                    traffic::inspect_har(&source, endpoint.as_deref(), search.as_deref(), compact)?;
+                let value = traffic::inspect_traffic_source(
+                    &source,
+                    endpoint.as_deref(),
+                    search.as_deref(),
+                    compact,
+                )?;
                 if let Some(path) = output.as_ref() {
                     if let Some(parent) = path.parent() {
                         if !parent.as_os_str().is_empty() {
@@ -5746,7 +5870,7 @@ async fn main() -> Result<()> {
                             "discover traffic-diff requires either --after <snapshot.json> or --source <capture.har>".into(),
                         )
                     })?;
-                    traffic::inspect_har(&source, None, None, false)?
+                    traffic::inspect_traffic_source(&source, None, None, false)?
                 };
                 let value = traffic::diff_traffic_value(&before_value, &after_value);
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
@@ -5826,6 +5950,7 @@ async fn main() -> Result<()> {
             search,
             schema,
             type_name,
+            output,
             pretty,
             format,
             auth_headers,
@@ -5837,6 +5962,14 @@ async fn main() -> Result<()> {
                     .await?;
             if schema {
                 let value = gql.schema_summary_value(search.as_deref());
+                if let Some(path) = output.as_ref() {
+                    if let Some(parent) = path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            fs::create_dir_all(parent)?;
+                        }
+                    }
+                    fs::write(path, serde_json::to_string_pretty(&value)?)?;
+                }
                 if let Some(format) = output::prefer_structured_output(format, pretty) {
                     println!("{}", output::format_structured_value(&value, format));
                 } else {

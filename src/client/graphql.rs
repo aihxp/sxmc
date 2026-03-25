@@ -222,13 +222,41 @@ impl GraphQLClient {
             }
         }
 
+        let operations = self
+            .operations
+            .iter()
+            .filter(|op| {
+                if let Some(pattern) = search_lower.as_deref() {
+                    let haystack = format!("{} {:?} {}", op.name, op.kind, op.description)
+                        .to_ascii_lowercase();
+                    haystack.contains(pattern)
+                } else {
+                    true
+                }
+            })
+            .map(|op| {
+                json!({
+                    "name": op.name,
+                    "kind": match op.kind {
+                        GraphQLOpKind::Query => "query",
+                        GraphQLOpKind::Mutation => "mutation",
+                    },
+                    "description": if op.description.is_empty() { Value::Null } else { Value::String(op.description.clone()) },
+                    "arg_count": op.args.len(),
+                    "returns_composite": op.returns_composite,
+                })
+            })
+            .collect::<Vec<_>>();
+
         json!({
+            "discovery_schema": "sxmc_discover_graphql_schema_v1",
             "source_type": "graphql",
             "url": self.url,
             "query_type": query_type,
             "mutation_type": mutation_type,
             "operation_count": self.operations.len(),
             "type_count": entries.len(),
+            "operations": operations,
             "types": entries,
         })
     }
@@ -292,6 +320,49 @@ impl GraphQLClient {
             "enum_values": enum_values,
         }))
     }
+}
+
+pub fn load_graphql_schema_snapshot(path: &std::path::Path) -> Result<Value> {
+    let contents = std::fs::read_to_string(path).map_err(|e| {
+        SxmcError::Other(format!(
+            "Failed to read GraphQL snapshot '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&contents).map_err(|e| {
+        SxmcError::Other(format!(
+            "GraphQL snapshot '{}' is not valid JSON: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    if value["discovery_schema"] != "sxmc_discover_graphql_schema_v1"
+        || value["source_type"] != "graphql"
+    {
+        return Err(SxmcError::Other(format!(
+            "GraphQL snapshot '{}' is not a valid sxmc GraphQL schema artifact.",
+            path.display()
+        )));
+    }
+    Ok(value)
+}
+
+pub fn diff_graphql_schema_value(before: &Value, after: &Value) -> Value {
+    json!({
+        "discovery_schema": "sxmc_discover_graphql_diff_v1",
+        "source_type": "graphql-diff",
+        "before_url": before["url"],
+        "after_url": after["url"],
+        "query_type_changed": before["query_type"] != after["query_type"],
+        "mutation_type_changed": before["mutation_type"] != after["mutation_type"],
+        "operation_count_changed": before["operation_count"] != after["operation_count"],
+        "type_count_changed": before["type_count"] != after["type_count"],
+        "operations_added": graphql_named_entry_diff(after["operations"].as_array(), before["operations"].as_array(), "kind"),
+        "operations_removed": graphql_named_entry_diff(before["operations"].as_array(), after["operations"].as_array(), "kind"),
+        "types_added": graphql_named_entry_diff(after["types"].as_array(), before["types"].as_array(), "kind"),
+        "types_removed": graphql_named_entry_diff(before["types"].as_array(), after["types"].as_array(), "kind"),
+    })
 }
 
 /// Run introspection query against a GraphQL endpoint.
@@ -554,6 +625,39 @@ fn graphql_type_to_param(type_name: &str) -> ParamType {
         "Boolean" => ParamType::Boolean,
         _ => ParamType::String,
     }
+}
+
+fn graphql_named_entry_diff(
+    left: Option<&Vec<Value>>,
+    right: Option<&Vec<Value>>,
+    kind_field: &str,
+) -> Value {
+    let left = graphql_named_entry_set(left, kind_field);
+    let right = graphql_named_entry_set(right, kind_field);
+    Value::Array(
+        left.difference(&right)
+            .cloned()
+            .map(Value::String)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn graphql_named_entry_set(
+    values: Option<&Vec<Value>>,
+    kind_field: &str,
+) -> std::collections::BTreeSet<String> {
+    values
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let kind = item[kind_field].as_str().unwrap_or("<unknown>");
+                    let name = item["name"].as_str().unwrap_or("<unknown>");
+                    format!("{kind}:{name}")
+                })
+                .collect::<std::collections::BTreeSet<_>>()
+        })
+        .unwrap_or_default()
 }
 
 /// Build a simple query string for an operation.
