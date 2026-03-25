@@ -114,6 +114,7 @@ pub struct WrappedCliServer {
     next_execution_id: Arc<AtomicU64>,
     tools: Vec<WrappedCliTool>,
     tool_index: HashMap<String, usize>,
+    skipped_interactive_tools: Vec<WrappedSkippedTool>,
 }
 
 #[derive(Clone, Default)]
@@ -156,6 +157,14 @@ struct WrappedCliTool {
 }
 
 #[derive(Clone)]
+struct WrappedSkippedTool {
+    name: String,
+    summary: String,
+    reasons: Vec<String>,
+    non_interactive_alternatives: Vec<String>,
+}
+
+#[derive(Clone)]
 struct WrappedOptionBinding {
     property: String,
     cli_flag: String,
@@ -195,10 +204,17 @@ pub fn build_wrapped_cli_server(
         &options.deny_tools,
         &argument_policies,
     );
+    let skipped_interactive_tools =
+        collect_skipped_interactive_tools(profile, &options.allow_tools, &options.deny_tools);
     if tools.is_empty() {
         return Err(SxmcError::Other(format!(
-            "sxmc wrap could not derive any MCP tools from '{}'. Re-run with `sxmc inspect cli <tool> --depth 1` to confirm the CLI surface is discoverable.",
-            profile.command
+            "sxmc wrap could not derive any MCP tools from '{}'. {}",
+            profile.command,
+            if skipped_interactive_tools.is_empty() {
+                "Re-run with `sxmc inspect cli <tool> --depth 1` to confirm the CLI surface is discoverable.".to_string()
+            } else {
+                "Detected only interactive/TUI-oriented commands for wrapping. Re-run `sxmc inspect cli <tool> --depth 1 --format json-pretty` to review `interactive` flags and non-interactive alternatives.".to_string()
+            }
         )));
     }
 
@@ -225,6 +241,7 @@ pub fn build_wrapped_cli_server(
         next_execution_id: Arc::new(AtomicU64::new(1)),
         tools,
         tool_index,
+        skipped_interactive_tools,
     })
 }
 
@@ -235,6 +252,42 @@ impl WrappedCliServer {
 
     pub fn wrapped_command(&self) -> &str {
         &self.wrapped_command
+    }
+
+    pub fn skipped_interactive_count(&self) -> usize {
+        self.skipped_interactive_tools.len()
+    }
+
+    pub fn skipped_interactive_messages(&self) -> Vec<String> {
+        self.skipped_interactive_tools
+            .iter()
+            .map(|skipped| {
+                if skipped.non_interactive_alternatives.is_empty() {
+                    format!(
+                        "Skipping interactive wrapped subcommand '{}': {}{}",
+                        skipped.name,
+                        skipped.summary,
+                        if skipped.reasons.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", skipped.reasons.join(", "))
+                        }
+                    )
+                } else {
+                    format!(
+                        "Skipping interactive wrapped subcommand '{}': {}{} (try {})",
+                        skipped.name,
+                        skipped.summary,
+                        if skipped.reasons.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", skipped.reasons.join(", "))
+                        },
+                        skipped.non_interactive_alternatives.join(", ")
+                    )
+                }
+            })
+            .collect()
     }
 
     pub fn working_dir(&self) -> Option<&str> {
@@ -929,6 +982,7 @@ fn build_wrapped_http_router(
         "wrapped_command": server.wrapped_command(),
         "inventory": {
             "tools": server.tool_count(),
+            "skipped_interactive_tools": server.skipped_interactive_count(),
         },
         "execution": {
             "working_dir": server.working_dir(),
@@ -987,6 +1041,7 @@ fn build_wrapped_tools(
         .subcommands
         .iter()
         .filter(|subcommand| subcommand.confidence != ConfidenceLevel::Low)
+        .filter(|subcommand| !subcommand.interactive)
     {
         let child_profile = profile.subcommand_profiles.iter().find(|candidate| {
             relative_subcommand_path(&profile.command, &candidate.command)
@@ -1036,6 +1091,40 @@ fn build_wrapped_tools(
             let normalized = sanitize_property_name(&tool.name);
             (allow_tools.is_empty() || allow_tools.contains(&normalized))
                 && !deny_tools.contains(&normalized)
+        })
+        .collect()
+}
+
+fn collect_skipped_interactive_tools(
+    profile: &CliSurfaceProfile,
+    allow_tools: &[String],
+    deny_tools: &[String],
+) -> Vec<WrappedSkippedTool> {
+    let allow_tools = allow_tools
+        .iter()
+        .map(|item| sanitize_property_name(item))
+        .collect::<HashSet<_>>();
+    let deny_tools = deny_tools
+        .iter()
+        .map(|item| sanitize_property_name(item))
+        .collect::<HashSet<_>>();
+
+    profile
+        .subcommands
+        .iter()
+        .filter(|subcommand| subcommand.interactive)
+        .filter_map(|subcommand| {
+            let normalized = sanitize_property_name(&subcommand.name);
+            let allowed = allow_tools.is_empty() || allow_tools.contains(&normalized);
+            if !allowed || deny_tools.contains(&normalized) {
+                return None;
+            }
+            Some(WrappedSkippedTool {
+                name: subcommand.name.clone(),
+                summary: subcommand.summary.clone(),
+                reasons: subcommand.interactive_reasons.clone(),
+                non_interactive_alternatives: subcommand.non_interactive_alternatives.clone(),
+            })
         })
         .collect()
 }

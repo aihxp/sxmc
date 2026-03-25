@@ -6359,6 +6359,9 @@ async fn main() -> Result<()> {
                     deny_positionals,
                 },
             )?;
+            for message in server.skipped_interactive_messages() {
+                eprintln!("[sxmc] {}", message);
+            }
             let required_headers = parse_headers(&require_headers)?;
             let bearer_token = parse_optional_secret(bearer_token)?;
             let limits = HttpServeLimits {

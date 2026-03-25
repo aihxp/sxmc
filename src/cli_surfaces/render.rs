@@ -479,6 +479,9 @@ mod tests {
                 .map(|index| ProfileSubcommand {
                     name: format!("cmd-{index}"),
                     summary: format!("Command {index}."),
+                    interactive: false,
+                    interactive_reasons: Vec::new(),
+                    non_interactive_alternatives: Vec::new(),
                     confidence: ConfidenceLevel::Medium,
                 })
                 .collect(),
@@ -494,6 +497,9 @@ mod tests {
                 machine_friendly: false,
             },
             workflows: Vec::new(),
+            interactive: false,
+            interactive_reasons: Vec::new(),
+            non_interactive_alternatives: Vec::new(),
             confidence_notes: Vec::new(),
             provenance: Provenance {
                 generated_by: "sxmc".into(),

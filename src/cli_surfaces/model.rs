@@ -37,6 +37,12 @@ pub struct CliSurfaceProfile {
     #[serde(default)]
     pub workflows: Vec<Workflow>,
     #[serde(default)]
+    pub interactive: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interactive_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub non_interactive_alternatives: Vec<String>,
+    #[serde(default)]
     pub confidence_notes: Vec<ConfidenceNote>,
     #[serde(default)]
     pub provenance: Provenance,
@@ -53,6 +59,12 @@ pub struct ProfileSubcommand {
     pub name: String,
     #[serde(default)]
     pub summary: String,
+    #[serde(default)]
+    pub interactive: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interactive_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub non_interactive_alternatives: Vec<String>,
     #[serde(default)]
     pub confidence: ConfidenceLevel,
 }

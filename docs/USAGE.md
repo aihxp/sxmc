@@ -163,6 +163,10 @@ Notes:
   the discovered top-level command surface.
 - default inspection depth is `1`, so wrapped tools can pick up subcommand
   options and positionals without requiring a separate saved profile step.
+- when inspection detects likely TUI or PTY-oriented subcommands, `sxmc wrap`
+  skips them by default instead of exposing brittle MCP tools for terminal UIs;
+  warnings include any detected non-interactive alternatives such as `--json`
+  or `--batch`.
 - wrapped tool calls execute the real CLI directly, with argument validation
   driven by the generated MCP schema and a default per-call timeout of 30
   seconds.
@@ -557,6 +561,10 @@ Deeper inspection:
 - larger values like `--depth 2` keep recursing into nested command groups for multi-layer CLIs such as `gh`
 - `sxmc inspect cli --compact` returns a lower-context summary with counts plus the top subcommands/options instead of the full profile
 - nested subcommand profiles are stored under `subcommand_profiles`
+- interactive or TUI-oriented commands are flagged with `interactive`,
+  `interactive_reasons`, and `non_interactive_alternatives` so downstream
+  agent and MCP flows can distinguish safe machine-friendly surfaces from
+  terminal UIs
 - macOS and BSD-style tools can fall back to `man` output when `--help` is sparse or unsupported
 - higher-signal `--help` results stay primary, while `man` output supplements weak summaries and missing options
 - Homebrew inspection now keeps real global options like `--debug`, `--quiet`, `--verbose`, and `--help` while still using `brew commands` for broad subcommand discovery

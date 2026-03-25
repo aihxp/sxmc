@@ -468,6 +468,54 @@ fi
     script
 }
 
+#[cfg(not(windows))]
+fn write_fake_interactive_cli(dir: &Path) -> std::path::PathBuf {
+    let script = dir.join("fake-interactive-cli");
+    let body = r#"#!/bin/sh
+if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then
+    cat <<'EOF'
+fake-interactive-cli doctor
+
+Run the Bubble Tea full-screen doctor UI.
+
+Usage:
+  fake-interactive-cli doctor [OPTIONS]
+
+Options:
+  --json   Print a non-interactive JSON report.
+EOF
+elif [ "$1" = "status" ] && [ "$2" = "--help" ]; then
+    cat <<'EOF'
+fake-interactive-cli status
+
+Print a machine-friendly status summary.
+
+Usage:
+  fake-interactive-cli status [OPTIONS]
+
+Options:
+  --json   Print status as JSON.
+EOF
+else
+    cat <<'EOF'
+fake-interactive-cli
+
+Demo CLI with one safe command and one BubbleTea TUI command.
+
+Commands:
+  doctor  Run the Bubble Tea full-screen doctor UI
+  status  Print a machine-friendly status summary
+EOF
+fi
+"#;
+    fs::write(&script, body).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
 #[test]
 fn test_version() {
     sxmc()
@@ -730,6 +778,45 @@ fn test_wrap_http_exposes_execution_resources() {
         serde_json::from_str(&command_stdout(&["http", &url, "--resource", &events_uri])).unwrap();
     assert!(events["stdout_event_count"].as_u64().unwrap_or(0) >= 1);
     assert_eq!(events["count"].as_u64().unwrap_or(0), 1);
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_wrap_skips_interactive_subcommands_from_stdio_surface() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_interactive_cli(temp.path());
+    let spec = serde_json::to_string(&vec![
+        sxmc_bin_string(),
+        "wrap".to_string(),
+        fake.to_string_lossy().into_owned(),
+    ])
+    .unwrap();
+
+    let tools = command_stdout(&["stdio", &spec, "--list-tools"]);
+    assert!(tools.contains("status"));
+    assert!(!tools.contains("doctor"));
+}
+
+#[cfg(not(windows))]
+#[tokio::test]
+async fn test_wrap_health_reports_skipped_interactive_tools() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_interactive_cli(temp.path());
+    let (mut child, port) = spawn_wrap_http_server(fake.to_string_lossy().as_ref(), &[]);
+
+    let response: serde_json::Value = reqwest::get(format!("http://127.0.0.1:{port}/healthz"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(response["status"], "ok");
+    assert_eq!(response["inventory"]["tools"], 1);
+    assert_eq!(response["inventory"]["skipped_interactive_tools"], 1);
 
     let _ = child.kill();
     let _ = child.wait();
@@ -2973,6 +3060,56 @@ fn test_wrap_git_uses_git_subcommand_descriptions() {
     assert!(!described_reset_lower.contains("terminfo"));
     assert!(!described_reset_lower.contains("initialize a terminal"));
     assert!(!described_rm_lower.contains("remove directory entries"));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_inspect_cli_marks_interactive_subcommands_and_alternatives() {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = write_fake_interactive_cli(temp.path());
+
+    let value = command_json(&["inspect", "cli", fake.to_str().unwrap(), "--depth", "1"]);
+    assert_eq!(value["interactive"], Value::Bool(true));
+
+    let doctor = value["subcommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "doctor")
+        .cloned()
+        .expect("doctor subcommand");
+    assert_eq!(doctor["interactive"], Value::Bool(true));
+    assert!(doctor["interactive_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason == "bubbletea" || reason == "full_screen_ui"));
+    assert!(doctor["non_interactive_alternatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "--json"));
+
+    let status = value["subcommands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "status")
+        .cloned()
+        .expect("status subcommand");
+    assert_eq!(status["interactive"], Value::Bool(false));
+
+    let nested = value["subcommand_profiles"].as_array().unwrap();
+    let doctor_profile = nested
+        .iter()
+        .find(|entry| entry["command"] == "fake-interactive-cli doctor")
+        .expect("doctor nested profile");
+    assert_eq!(doctor_profile["interactive"], Value::Bool(true));
+    assert!(doctor_profile["non_interactive_alternatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "--json"));
 }
 
 #[cfg(not(windows))]

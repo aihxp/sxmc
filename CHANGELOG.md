@@ -28,6 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   setup/staleness story is visible in one place with next-step commands
 - `sxmc doctor --fix` and `sxmc doctor --remove` now infer configured hosts and
   the saved CLI surface when a repo already has Sumac-managed state
+- `sxmc inspect cli --depth 1` now marks likely TUI/interactive commands and
+  subcommands with `interactive`, `interactive_reasons`, and
+  `non_interactive_alternatives` metadata so downstream consumers can avoid
+  wrapping unsafe terminal UIs by default
+- `sxmc wrap` now skips subcommands flagged as interactive/TUI-oriented and
+  emits explicit warnings plus suggested non-interactive alternatives when it
+  finds safer machine-friendly flags like `--json` or `--batch`
 - wrapped nested subcommands now keep parent-tool descriptions like `git log`
   instead of drifting to unrelated system commands such as macOS `log`
 - generated CLI profiles now write to real saved profile files during apply

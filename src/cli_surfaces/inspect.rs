@@ -1021,6 +1021,44 @@ fn inspect_parts(
 
         if !subcommand_profiles.is_empty() {
             profile.subcommand_profiles = subcommand_profiles;
+            for subcommand in &mut profile.subcommands {
+                if let Some(child_profile) = profile.subcommand_profiles.iter().find(|candidate| {
+                    inspect_relative_subcommand_path(&profile.command, &candidate.command)
+                        .first()
+                        .is_some_and(|segment| segment == &subcommand.name)
+                }) {
+                    if child_profile.interactive {
+                        subcommand.interactive = true;
+                    }
+                    for reason in &child_profile.interactive_reasons {
+                        if !subcommand
+                            .interactive_reasons
+                            .iter()
+                            .any(|existing| existing == reason)
+                        {
+                            subcommand.interactive_reasons.push(reason.clone());
+                        }
+                    }
+                    for alternative in &child_profile.non_interactive_alternatives {
+                        if !subcommand
+                            .non_interactive_alternatives
+                            .iter()
+                            .any(|existing| existing == alternative)
+                        {
+                            subcommand
+                                .non_interactive_alternatives
+                                .push(alternative.clone());
+                        }
+                    }
+                }
+            }
+            if profile
+                .subcommands
+                .iter()
+                .any(|subcommand| subcommand.interactive)
+            {
+                profile.interactive = true;
+            }
         }
     }
 
@@ -1393,6 +1431,9 @@ fn parse_help_text(
     let positionals = parse_positionals(&lines, command_name);
     let examples = parse_examples(&lines, command_name);
     let (auth, environment) = infer_requirements(help);
+    let interactive_reasons = infer_interactive_reasons(help, &summary);
+    let non_interactive_alternatives = infer_non_interactive_alternatives(&options);
+    let has_interactive_subcommands = subcommands.iter().any(|subcommand| subcommand.interactive);
     let workflows = infer_workflows(&subcommands);
     let output_behavior = infer_output_behavior(help);
     let mut confidence_notes = vec![ConfidenceNote {
@@ -1403,6 +1444,15 @@ fn parse_help_text(
         confidence_notes.push(ConfidenceNote {
             level: ConfidenceLevel::Low,
             summary: "No examples were detected in help output; generated agent guidance may need manual examples.".into(),
+        });
+    }
+    if !interactive_reasons.is_empty() {
+        confidence_notes.push(ConfidenceNote {
+            level: ConfidenceLevel::Medium,
+            summary: format!(
+                "This CLI looks interactive/TUI-oriented ({}). Downstream MCP wrapping may skip unsafe subcommands by default.",
+                interactive_reasons.join(", ")
+            ),
         });
     }
 
@@ -1424,6 +1474,9 @@ fn parse_help_text(
         environment,
         output_behavior,
         workflows,
+        interactive: !interactive_reasons.is_empty() || has_interactive_subcommands,
+        interactive_reasons,
+        non_interactive_alternatives,
         confidence_notes,
         provenance: Provenance {
             generated_by: "sxmc".into(),
@@ -1557,11 +1610,15 @@ fn parse_subcommands(lines: &[&str], command_name: &str) -> Vec<ProfileSubcomman
         }
 
         if let Some((name, summary, confidence)) = parse_subcommand_row(stripped, command_name) {
+            let interactive_reasons = infer_interactive_reasons(&summary, &summary);
             push_subcommand(
                 &mut subcommands,
                 ProfileSubcommand {
                     name,
                     summary,
+                    interactive: !interactive_reasons.is_empty(),
+                    interactive_reasons,
+                    non_interactive_alternatives: Vec::new(),
                     confidence,
                 },
             );
@@ -1574,6 +1631,9 @@ fn parse_subcommands(lines: &[&str], command_name: &str) -> Vec<ProfileSubcomman
                 subcommands.push(ProfileSubcommand {
                     name,
                     summary: "Listed in CLI help output.".into(),
+                    interactive: false,
+                    interactive_reasons: Vec::new(),
+                    non_interactive_alternatives: Vec::new(),
                     confidence: ConfidenceLevel::Medium,
                 });
                 pending_summary_idx = Some(subcommands.len() - 1);
@@ -1599,6 +1659,9 @@ fn parse_subcommands(lines: &[&str], command_name: &str) -> Vec<ProfileSubcomman
                 ProfileSubcommand {
                     name,
                     summary: "Listed in CLI help output.".into(),
+                    interactive: false,
+                    interactive_reasons: Vec::new(),
+                    non_interactive_alternatives: Vec::new(),
                     confidence: ConfidenceLevel::Medium,
                 },
             );
@@ -1848,6 +1911,134 @@ fn infer_requirements(help: &str) -> (Vec<AuthRequirement>, Vec<EnvironmentRequi
     }
 
     (auth, environment)
+}
+
+fn infer_interactive_reasons(help: &str, summary: &str) -> Vec<String> {
+    let mut reasons = Vec::new();
+    let lowered = format!("{}\n{}", summary, help).to_ascii_lowercase();
+
+    let mut push_reason = |reason: &str| {
+        if !reasons.iter().any(|existing| existing == reason) {
+            reasons.push(reason.to_string());
+        }
+    };
+
+    if lowered.contains("bubbletea") || lowered.contains("bubble tea") {
+        push_reason("bubbletea");
+    }
+    if Regex::new(r"\bink\b").unwrap().is_match(&lowered) {
+        push_reason("ink");
+    }
+    if lowered.contains("ncurses") || Regex::new(r"\bcurses\b").unwrap().is_match(&lowered) {
+        push_reason("ncurses");
+    }
+    if lowered.contains("full-screen")
+        || lowered.contains("full screen")
+        || lowered.contains("fullscreen")
+        || lowered.contains("alternate screen")
+    {
+        push_reason("full_screen_ui");
+    }
+    if lowered.contains("raw mode")
+        || lowered.contains("pty")
+        || lowered.contains("tty")
+        || lowered.contains("terminal ui")
+        || Regex::new(r"\btui\b").unwrap().is_match(&lowered)
+    {
+        push_reason("tty_required");
+    }
+    if lowered.contains("interactive mode")
+        || lowered.contains("interactive session")
+        || lowered.contains("use arrow keys")
+        || lowered.contains("press q")
+        || lowered.contains("press enter")
+        || lowered.contains("navigate with")
+    {
+        push_reason("interactive_ui");
+    }
+    if lowered.contains("pager")
+        || lowered.contains("$pager")
+        || lowered.contains("$editor")
+        || lowered.contains("opens your editor")
+        || lowered.contains("open in editor")
+    {
+        push_reason("pager_or_editor");
+    }
+
+    reasons
+}
+
+fn infer_non_interactive_alternatives(options: &[ProfileOption]) -> Vec<String> {
+    let mut alternatives = Vec::new();
+
+    let mut push_alternative = |flag: String| {
+        if !alternatives.iter().any(|existing| existing == &flag) {
+            alternatives.push(flag);
+        }
+    };
+
+    for preferred in [
+        "--json",
+        "--batch",
+        "--non-interactive",
+        "--no-interactive",
+        "--no-interaction",
+        "--no-pager",
+        "--porcelain",
+        "--plain",
+    ] {
+        if let Some(option) = options.iter().find(|option| option.name == preferred) {
+            push_alternative(option.name.clone());
+        }
+    }
+
+    if let Some(option) = options.iter().find(|option| {
+        option.name == "-b"
+            || option.short.as_deref() == Some("-b")
+            || option.short.as_deref() == Some("b")
+            || option.name == "--batch"
+    }) {
+        let flag = if option.name.starts_with('-') {
+            option.name.clone()
+        } else {
+            option
+                .short
+                .as_ref()
+                .map(|short| {
+                    if short.starts_with('-') {
+                        short.clone()
+                    } else {
+                        format!("-{}", short)
+                    }
+                })
+                .unwrap_or_else(|| option.name.clone())
+        };
+        push_alternative(flag);
+    }
+
+    alternatives
+}
+
+fn inspect_relative_subcommand_path(base_command: &str, child_command: &str) -> Vec<String> {
+    let derived = child_command
+        .strip_prefix(base_command)
+        .map(str::trim)
+        .filter(|rest| !rest.is_empty())
+        .map(|rest| {
+            rest.split_whitespace()
+                .map(|segment| segment.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !derived.is_empty() {
+        return derived;
+    }
+
+    child_command
+        .split_whitespace()
+        .last()
+        .map(|segment| vec![segment.to_string()])
+        .unwrap_or_default()
 }
 
 fn infer_workflows(subcommands: &[ProfileSubcommand]) -> Vec<Workflow> {
@@ -2480,6 +2671,9 @@ fn parse_usage_subcommands(lines: &[&str], command_name: &str) -> Vec<ProfileSub
                         inferred.push(ProfileSubcommand {
                             name: next.to_string(),
                             summary: "Inferred from usage examples in help output.".into(),
+                            interactive: false,
+                            interactive_reasons: Vec::new(),
+                            non_interactive_alternatives: Vec::new(),
                             confidence: ConfidenceLevel::Medium,
                         });
                     }
@@ -2535,6 +2729,9 @@ fn parse_invocation_subcommands(lines: &[&str], command_name: &str) -> Vec<Profi
                 inferred.push(ProfileSubcommand {
                     name: next.to_string(),
                     summary: "Inferred from CLI usage examples.".into(),
+                    interactive: false,
+                    interactive_reasons: Vec::new(),
+                    non_interactive_alternatives: Vec::new(),
                     confidence: ConfidenceLevel::Medium,
                 });
             }

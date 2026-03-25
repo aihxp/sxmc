@@ -590,6 +590,63 @@ if has_cmd git; then
   fi
 fi
 
+if [ "$IS_WINDOWS" -ne 1 ]; then
+  FAKE_TUI="$TMPDIR_TEST/fake-interactive-cli"
+  cat > "$FAKE_TUI" <<'EOF'
+#!/bin/sh
+if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then
+  cat <<'INNER'
+fake-interactive-cli doctor
+
+Run the Bubble Tea full-screen doctor UI.
+
+Usage:
+  fake-interactive-cli doctor [OPTIONS]
+
+Options:
+  --json   Print a non-interactive JSON report.
+INNER
+elif [ "$1" = "status" ] && [ "$2" = "--help" ]; then
+  cat <<'INNER'
+fake-interactive-cli status
+
+Print a machine-friendly status summary.
+
+Usage:
+  fake-interactive-cli status [OPTIONS]
+
+Options:
+  --json   Print status as JSON.
+INNER
+else
+  cat <<'INNER'
+fake-interactive-cli
+
+Demo CLI with one safe command and one BubbleTea TUI command.
+
+Commands:
+  doctor  Run the Bubble Tea full-screen doctor UI
+  status  Print a machine-friendly status summary
+INNER
+fi
+EOF
+  chmod +x "$FAKE_TUI"
+
+  tui_profile=$("$SXMC" inspect cli "$FAKE_TUI" --depth 1 2>/dev/null || true)
+  if json_check "$tui_profile" "d.get('interactive') is True and any(cmd.get('name') == 'doctor' and cmd.get('interactive') for cmd in d.get('subcommands', []))"; then
+    pass "inspect flags interactive TUI subcommands"
+  else
+    fail "inspect interactive flags" "${tui_profile:0:140}"
+  fi
+
+  tui_tools=$("$SXMC" stdio "$SXMC wrap $FAKE_TUI" --list-tools 2>/dev/null || true)
+  if echo "$tui_tools" | grep -q "status" && ! echo "$tui_tools" | grep -q "doctor"; then
+    pass "wrap skips interactive TUI subcommands"
+  else
+    fail "wrap skips interactive subcommands" "${tui_tools:0:140}"
+  fi
+fi
+
 # ── Section 20: Status & Watch ──
 section "20. Status & Watch"
 
