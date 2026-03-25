@@ -45,7 +45,8 @@ Before a release:
 3. confirm `Cargo.toml` and packaging metadata are aligned
 4. confirm `README.md` matches the current public surface
 5. confirm the architecture and usage docs still match the shipped command set
-6. confirm `scripts/test-sxmc.sh` is green against the release candidate binary
+6. confirm [`PRODUCT_CONTRACT.md`](PRODUCT_CONTRACT.md) and [`STABILITY.md`](STABILITY.md) still describe the shipped UX truthfully
+7. confirm `scripts/test-sxmc.sh` is green against the release candidate binary
 
 Release steps:
 
@@ -70,6 +71,25 @@ Cross-platform release confidence:
 - Unix CI lanes run `scripts/test-sxmc.sh` against the built debug binary
 - Windows CI validates `doctor`, compact inspection, and cache stats through
   PowerShell JSON checks in addition to `cargo test`
+
+## `1.x` Release Semantics
+
+For the `1.x` line, release notes should distinguish clearly between:
+
+- stable workflow commitments
+  - onboarding with `setup` and `add`
+  - maintenance with `status`, `doctor`, and `sync`
+- additive capability growth
+  - new discovery surfaces
+  - richer JSON/status fields
+  - broader host coverage
+- best-effort heuristics
+  - inferred summaries
+  - quality scores
+  - performance snapshots
+
+That keeps Sumac honest: stable where it matters, still improving where
+inference and ecosystem breadth naturally evolve.
 
 ## Distribution
 

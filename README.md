@@ -1,8 +1,30 @@
 # Sumac (`sxmc`)
 
-Bring out what your tools can do. One Rust binary that bridges skills, MCP servers, and APIs — so every tool you have becomes AI-accessible.
+Sumac makes AI assistants stop guessing how your tools work.
+
+It inspects the real tools already on your machine, turns them into structured
+profiles, and uses that knowledge to generate AI-host startup docs, client
+config, MCP wrappers, and reusable discovery artifacts from one Rust binary.
 
 [Crates.io](https://crates.io/crates/sxmc) | [docs.rs](https://docs.rs/sxmc/latest/sxmc/)
+
+## Stable Product Path
+
+If you only learn four commands, learn these:
+
+```bash
+sxmc setup --root .
+sxmc add gh --root .
+sxmc status --human
+sxmc sync --root . --apply
+```
+
+What they mean:
+
+- `sxmc setup`: onboard the common tools a repo uses
+- `sxmc add <tool>`: teach Sumac and your AI hosts one more CLI
+- `sxmc status`: see what your AI knows, what is stale, and what to do next
+- `sxmc sync`: reconcile saved profiles and generated host artifacts as tools change
 
 ## Why It Exists
 
@@ -154,8 +176,32 @@ sxmc completions bash > ~/.local/share/bash-completion/completions/sxmc
 
 The current validation docs capture the real-world comparison set, token/turn estimates, and hidden retry-cost analysis.
 
+## Stability
+
+The product name is **Sumac**. The command stays **`sxmc`**.
+
+The maintained support boundary for the upcoming `1.0.0` line is:
+
+- stable onboarding and maintenance commands:
+  - `sxmc setup`
+  - `sxmc add`
+  - `sxmc doctor`
+  - `sxmc status`
+  - `sxmc sync`
+- stable machine-readable output contracts for those onboarding and maintenance commands
+- stable host-selection aliases such as `--client` and `--host`
+- additive evolution for richer JSON output instead of silent shape rewrites
+
+See:
+
+- [Product Contract](docs/PRODUCT_CONTRACT.md)
+- [Stability Guide](docs/STABILITY.md)
+
 ## Command Overview
 
+- `sxmc setup` / `sxmc add`: first-run onboarding and one-tool onboarding
+- `sxmc status` / `sxmc sync`: maintained-state view and reconciliation loop
+- `sxmc doctor`: startup-discovery health and repair guidance
 - `sxmc serve`: expose skills as stdio or HTTP MCP
 - `sxmc skills`: list, inspect, run, and generate skills
 - `sxmc stdio` / `sxmc http`: raw MCP bridge and debugging layer
@@ -205,6 +251,7 @@ The current validation docs capture the real-world comparison set, token/turn es
 - [Operations](docs/OPERATIONS.md): hosting, release process, branch policy, distribution
 - [Validation](docs/VALIDATION.md): tests, smoke checks, compatibility, token/turn findings
 - [Product Contract](docs/PRODUCT_CONTRACT.md): explicit support boundary
+- [Stability](docs/STABILITY.md): what `1.0.0` will promise, what evolves additively, and what remains out of scope
 - [CLI Surfaces](docs/CLI_SURFACES.md): CLI-to-AI model, profile contract, write policy
 - [CLI to AI Compatibility](docs/CLI_TO_AI_COMPATIBILITY.md): host-by-host coverage matrix
 

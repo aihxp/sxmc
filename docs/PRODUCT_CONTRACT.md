@@ -86,6 +86,23 @@ These are the core product paths we should treat as stable:
   `sxmc doctor --host ...` / `sxmc status --host ...` are stable naming aliases
   for the primary host-selection flags
 
+### 6. Stable Machine-Readable Contracts
+
+These machine-readable surfaces are part of the promised product contract:
+
+- `sxmc add --format ...`
+- `sxmc setup --format ...`
+- `sxmc doctor --format ...`
+- `sxmc status --format ...`
+- `sxmc sync --format ...`
+
+Contract rules for these outputs:
+
+- top-level shapes should remain stable within the `1.x` line
+- new fields should be added additively rather than replacing old ones
+- stable exit-code behavior should not drift silently
+- recovery guidance should become more specific over time, not disappear
+
 ## Should Fail Gracefully
 
 These scenarios should not crash the product or produce misleading results:
@@ -117,6 +134,7 @@ Before a release, we should be able to point to:
 2. a current compatibility matrix
 3. a current benchmark snapshot
 4. a documented support boundary for anything still out of scope
+5. a current [STABILITY.md](STABILITY.md) statement that still matches the shipped UX
 
 If a behavior is not covered by one of those, it should not be described as a
 guaranteed product path.

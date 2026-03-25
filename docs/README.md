@@ -13,6 +13,7 @@ Additional documentation for Sumac (`sxmc`) developers and maintainers.
 | [VALIDATION.md](VALIDATION.md) | Test, smoke, compatibility, and benchmark summary |
 | [CLI_TO_AI_COMPATIBILITY.md](CLI_TO_AI_COMPATIBILITY.md) | Host-by-host `CLI -> AI` coverage matrix for startup docs, native config, and apply behavior |
 | [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md) | Explicit support boundary: what Sumac guarantees, degrades gracefully, or leaves out of scope |
+| [STABILITY.md](STABILITY.md) | `1.0.0` readiness contract: stable commands, additive JSON rules, and what remains best-effort |
 | [CLI_SURFACES.md](CLI_SURFACES.md) | Shipped `CLI -> AI` model: inspection, host-aware startup artifacts, provenance, depth limits, and review/apply rules |
-| [TEST_SUITE_REPORT_v0.2.44.md](TEST_SUITE_REPORT_v0.2.44.md) | Comprehensive test results for v0.2.44 (296 tests, benchmarks, 10x10x10 matrix, discovery lifecycle, onboarding/status contract audit, local sync reconciliation) |
+| [TEST_SUITE_REPORT_v0.2.45.md](TEST_SUITE_REPORT_v0.2.45.md) | Comprehensive test results for v0.2.45 (296 tests, benchmarks, 10x10x10 matrix, discovery lifecycle, onboarding/status contract audit, local sync reconciliation, stability sweep) |
 | [TEST_SCRIPT_GUIDE.md](TEST_SCRIPT_GUIDE.md) | Guide to the test script: architecture, sections, how to run on other platforms |

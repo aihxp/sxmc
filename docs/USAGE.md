@@ -2,7 +2,11 @@
 
 The shortest path through `sxmc` is:
 
-- `doctor` to see startup-discovery status and the next best `sxmc` command
+- `setup` for first-run onboarding across common tools
+- `add` when you want to onboard one more CLI
+- `status` to see what your AI knows and what is stale
+- `sync` to reconcile saved profiles and generated host artifacts
+- `doctor` to repair or remove startup state when something is missing
 - `serve` to publish skills as MCP
 - `mcp` for daily MCP client work against baked connections
 - `stdio` and `http` for raw or ad hoc MCP bridging
@@ -22,11 +26,29 @@ Or build from source:
 
 ```bash
 git clone https://github.com/aihxp/sumac.git
-cd sxmc
+cd sumac
 cargo build --release
 ```
 
 Prebuilt release archives and checksums are published on GitHub Releases.
+
+## Stable First-Run Workflow
+
+If you are onboarding a repo from scratch, use this order:
+
+```bash
+sxmc setup --root .
+sxmc status --human
+sxmc add gh --root .
+sxmc sync --root . --apply
+```
+
+What each command does:
+
+- `sxmc setup` discovers common installed tools and prepares host-facing docs/config
+- `sxmc status` shows configured hosts, stale knowledge, recovery hints, and sync state
+- `sxmc add <tool>` teaches Sumac and your AI hosts one additional CLI
+- `sxmc sync --apply` refreshes derived state after tools or profiles change
 
 ## Serve Skills As MCP
 
@@ -529,6 +551,12 @@ sxmc init discovery codebase.json --coverage full --host claude-code,cursor --mo
 - `sxmc sync` is the maintained-state companion to `add` and `setup`: once a
   repo already has saved profiles and host files, `sync` keeps those derived
   artifacts honest as the underlying CLI binaries change.
+
+Recommended lifecycle:
+
+```text
+setup -> add -> status -> sync
+```
 
 Pipeline summary:
 

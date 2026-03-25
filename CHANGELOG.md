@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.2.45] - 2026-03-25
+
+### Changed
+
+- top-level docs now treat `setup -> add -> status -> sync` as the stable
+  first-run and maintenance workflow for the upcoming `1.0.0` line
+- added `docs/STABILITY.md` to make the `1.x` support promise explicit:
+  stable onboarding and maintenance commands, additive machine-readable output
+  evolution, and clear best-effort boundaries for inferred metadata
+
 ## [0.2.44] - 2026-03-25
 
 ### Added
