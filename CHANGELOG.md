@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-25
+
+### Changed
+
+- synced the published crate and distribution metadata with the current GitHub
+  repository state after the post-`1.0.0` documentation cleanup
+- collapsed redundant per-version validation reports into
+  `docs/VALIDATION_HISTORY.md` while keeping the maintained stable report at
+  `docs/TEST_SUITE_REPORT_v1.0.0.md`
+
 ## [1.0.0] - 2026-03-25
 
 ### Added
