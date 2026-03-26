@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `sxmc setup`, `sxmc add`, `sxmc init ai`, `sxmc doctor`, `sxmc status`,
   `sxmc sync`, and `sxmc watch` now support `--global` / `--local` install
   scope selection for CLI -> AI host artifacts
+- `sxmc skills install` now installs metadata-managed skills into either
+  project-local or user-global skill directories
+- `sxmc skills update` now refreshes metadata-managed skills from their
+  recorded source
+- `sxmc skills list --installed --json` now returns managed-skill metadata so
+  agents can tell which skills are refreshable
 
 ### Changed
 
@@ -19,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   forcing repo-local startup files
 - global saved profiles and sync state now live under Sumac's config directory
   instead of repo-local `.sxmc` state
+- metadata-managed skills now use the same global/local install-scope model as
+  the rest of the startup lifecycle
 
 ## [1.0.7] - 2026-03-25
 

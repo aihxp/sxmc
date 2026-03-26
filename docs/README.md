@@ -4,7 +4,7 @@ Additional documentation for Sumac (`sxmc`) developers and maintainers.
 
 | Document | Description |
 |----------|-------------|
-| [USAGE.md](USAGE.md) | Install, quick start, MCP workflows, client setup, and agent guidance |
+| [USAGE.md](USAGE.md) | Install, quick start, managed skill installs, MCP workflows, client setup, and agent guidance |
 | [SIDE_BY_SIDE.md](SIDE_BY_SIDE.md) | With vs without `sxmc`: practical workflow compression for APIs, skills, MCP, and onboarding |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, pipeline boundaries, extension points, and design decisions |
 | [ROADMAP.md](ROADMAP.md) | Post-`1.0.0` product themes for maintenance, discovery delivery, and ecosystem hardening |

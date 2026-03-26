@@ -2284,6 +2284,16 @@ pub enum SkillsAction {
     List {
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<PathBuf>>,
+        #[arg(long, conflicts_with = "paths")]
+        installed: bool,
+        #[arg(long, default_value = ".claude/skills", conflicts_with = "paths")]
+        skills_path: PathBuf,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
+        #[arg(long, conflicts_with_all = ["local", "root", "paths"])]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        root: Option<PathBuf>,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -2325,5 +2335,31 @@ pub enum SkillsAction {
         output_dir: PathBuf,
         #[arg(long = "auth-header", value_name = "K:V")]
         auth_headers: Vec<String>,
+    },
+    Install {
+        source: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        r#ref: Option<String>,
+        #[arg(long, default_value = ".claude/skills")]
+        skills_path: PathBuf,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
+        #[arg(long, conflicts_with_all = ["local", "root"])]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        root: Option<PathBuf>,
+    },
+    Update {
+        name: Option<String>,
+        #[arg(long, default_value = ".claude/skills")]
+        skills_path: PathBuf,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
+        #[arg(long, conflicts_with_all = ["local", "root"])]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        root: Option<PathBuf>,
     },
 }

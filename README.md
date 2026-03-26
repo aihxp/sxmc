@@ -78,6 +78,14 @@ sxmc serve
 sxmc serve --transport http --host 127.0.0.1 --port 8000
 ```
 
+Install a reusable skill into project-local or user-global skill storage:
+
+```bash
+sxmc skills install tests/fixtures/simple-skill --root .
+sxmc skills install https://github.com/openai/skills/tree/main/skills/.curated/example-skill --global
+sxmc skills update simple-skill --global
+```
+
 Inspect and call any MCP server from the terminal:
 
 ```bash

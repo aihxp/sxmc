@@ -8326,6 +8326,140 @@ fn test_discover_db_output_writes_snapshot() {
     assert!(snapshot["count"].as_u64().unwrap_or(0) >= 2);
 }
 
+#[test]
+fn test_skills_install_local_copies_skill_and_records_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("simple-skill");
+
+    sxmc()
+        .args([
+            "skills",
+            "install",
+            source.to_str().unwrap(),
+            "--root",
+            temp.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed skill `simple-skill`"));
+
+    let installed = temp
+        .path()
+        .join(".claude")
+        .join("skills")
+        .join("simple-skill")
+        .join("SKILL.md");
+    assert!(installed.exists());
+
+    let listed = command_json(&[
+        "skills",
+        "list",
+        "--installed",
+        "--root",
+        temp.path().to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["name"], "simple-skill");
+    assert_eq!(listed[0]["install_scope"], "local");
+    assert_eq!(listed[0]["managed"], true);
+    assert_eq!(listed[0]["update_status"], "updatable");
+}
+
+#[test]
+fn test_skills_update_local_refreshes_managed_skill_from_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let source_root = temp.path().join("source");
+    let source_skill = source_root.join("managed-skill");
+    fs::create_dir_all(&source_skill).unwrap();
+    fs::write(
+        source_skill.join("SKILL.md"),
+        r#"---
+name: managed-skill
+description: Managed skill
+---
+Hello version one
+"#,
+    )
+    .unwrap();
+
+    sxmc()
+        .args([
+            "skills",
+            "install",
+            source_skill.to_str().unwrap(),
+            "--root",
+            temp.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    fs::write(
+        source_skill.join("SKILL.md"),
+        r#"---
+name: managed-skill
+description: Managed skill
+---
+Hello version two
+"#,
+    )
+    .unwrap();
+
+    sxmc()
+        .args([
+            "skills",
+            "update",
+            "managed-skill",
+            "--root",
+            temp.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated skill `managed-skill`"));
+
+    let installed_body = fs::read_to_string(
+        temp.path()
+            .join(".claude")
+            .join("skills")
+            .join("managed-skill")
+            .join("SKILL.md"),
+    )
+    .unwrap();
+    assert!(installed_body.contains("Hello version two"));
+}
+
+#[test]
+fn test_skills_install_global_writes_user_skill_dir() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("simple-skill");
+
+    sxmc_with_config_home(temp.path())
+        .args(["skills", "install", source.to_str().unwrap(), "--global"])
+        .assert()
+        .success();
+
+    let installed = temp
+        .path()
+        .join(".claude")
+        .join("skills")
+        .join("simple-skill")
+        .join("SKILL.md");
+    assert!(installed.exists());
+
+    let listed = command_json_with_config_home(
+        temp.path(),
+        &["skills", "list", "--installed", "--global", "--json"],
+    );
+    assert_eq!(listed[0]["name"], "simple-skill");
+    assert_eq!(listed[0]["install_scope"], "global");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_skills_create_from_local_spec() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

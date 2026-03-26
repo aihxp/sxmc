@@ -1702,6 +1702,62 @@ else
   fail "skills list --counts-only" "${skills_counts:0:120}"
 fi
 
+SKILL_INSTALL_ROOT="$TMPDIR_TEST/skills-install-root"
+install_out=$("$SXMC" skills install "$FIXTURES/simple-skill" --root "$SKILL_INSTALL_ROOT" 2>&1)
+if echo "$install_out" | grep -q 'Installed skill `simple-skill`' && [ -f "$SKILL_INSTALL_ROOT/.claude/skills/simple-skill/SKILL.md" ]; then
+  pass "skills install copies local skill into project scope"
+else
+  fail "skills install local" "${install_out:0:120}"
+fi
+
+installed_list=$("$SXMC" skills list --installed --root "$SKILL_INSTALL_ROOT" --json 2>&1)
+if json_check "$installed_list" "isinstance(d, list) and len(d) == 1 and d[0]['name'] == 'simple-skill' and d[0]['install_scope'] == 'local' and d[0]['managed'] is True"; then
+  pass "skills list --installed exposes metadata-managed local installs"
+else
+  fail "skills list --installed" "${installed_list:0:120}"
+fi
+
+UPDATE_SOURCE="$TMPDIR_TEST/update-source/managed-skill"
+mkdir -p "$UPDATE_SOURCE"
+cat > "$UPDATE_SOURCE/SKILL.md" << 'UPDATESKILL'
+---
+name: managed-skill
+description: Managed update test
+---
+Hello version one
+UPDATESKILL
+
+"$SXMC" skills install "$UPDATE_SOURCE" --root "$SKILL_INSTALL_ROOT" >/dev/null 2>&1
+cat > "$UPDATE_SOURCE/SKILL.md" << 'UPDATESKILL'
+---
+name: managed-skill
+description: Managed update test
+---
+Hello version two
+UPDATESKILL
+
+update_out=$("$SXMC" skills update managed-skill --root "$SKILL_INSTALL_ROOT" 2>&1)
+if echo "$update_out" | grep -q 'Updated skill `managed-skill`' && grep -q "Hello version two" "$SKILL_INSTALL_ROOT/.claude/skills/managed-skill/SKILL.md"; then
+  pass "skills update refreshes managed local skills from source metadata"
+else
+  fail "skills update" "${update_out:0:120}"
+fi
+
+GLOBAL_SKILLS_HOME="$TMPDIR_TEST/global-skills-home"
+mkdir -p "$GLOBAL_SKILLS_HOME"
+global_install_out=$(
+  HOME="$GLOBAL_SKILLS_HOME" USERPROFILE="$GLOBAL_SKILLS_HOME" \
+  XDG_CONFIG_HOME="$GLOBAL_SKILLS_HOME/.config" \
+  APPDATA="$GLOBAL_SKILLS_HOME/AppData/Roaming" \
+  LOCALAPPDATA="$GLOBAL_SKILLS_HOME/AppData/Local" \
+  "$SXMC" skills install "$FIXTURES/simple-skill" --global 2>&1
+)
+if echo "$global_install_out" | grep -q 'Installed skill `simple-skill`' && [ -f "$GLOBAL_SKILLS_HOME/.claude/skills/simple-skill/SKILL.md" ]; then
+  pass "skills install --global writes to user skill directory"
+else
+  fail "skills install --global" "${global_install_out:0:120}"
+fi
+
 # Skills run
 run_out=$("$SXMC" skills run simple-skill --paths "$FIXTURES" TestUser 2>&1)
 if echo "$run_out" | grep -q "Hello TestUser"; then

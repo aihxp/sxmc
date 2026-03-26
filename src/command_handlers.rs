@@ -21,11 +21,12 @@ pub struct ApiCommandOptions<'a> {
     pub pretty: bool,
     pub format: Option<output::StructuredOutputFormat>,
 }
-use sxmc::skills::{discovery, models::Skill, parser};
+use sxmc::skills::{discovery, install, models::Skill, parser};
 use tokio::process::Command;
 
 pub struct SkillListOptions<'a> {
     pub json_output: bool,
+    pub installed_only: bool,
     pub names_only: bool,
     pub counts_only: bool,
     pub no_descriptions: bool,
@@ -41,12 +42,19 @@ pub fn cmd_skills_list(paths: &[PathBuf], options: SkillListOptions<'_>) -> Resu
     for dir in &skill_dirs {
         let source = dir.parent().and_then(|p| p.to_str()).unwrap_or("unknown");
         match parser::parse_skill(dir, source) {
-            Ok(skill) => skills.push(skill),
+            Ok(skill) => {
+                let metadata = install::read_installed_skill_metadata(dir)?;
+                skills.push((skill, metadata));
+            }
             Err(e) => eprintln!("Warning: {}: {}", dir.display(), e),
         }
     }
 
-    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    if options.installed_only {
+        skills.retain(|(_, metadata)| metadata.is_some());
+    }
+
+    skills.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     apply_offset_limit(&mut skills, options.offset, options.limit);
 
     if options.counts_only {
@@ -64,7 +72,7 @@ pub fn cmd_skills_list(paths: &[PathBuf], options: SkillListOptions<'_>) -> Resu
         }
     } else if options.names_only {
         if options.json_output {
-            let items: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+            let items: Vec<&str> = skills.iter().map(|(s, _)| s.name.as_str()).collect();
             println!("{}", serde_json::to_string_pretty(&items)?);
         } else if skills.is_empty() {
             println!("No skills found.");
@@ -72,14 +80,14 @@ pub fn cmd_skills_list(paths: &[PathBuf], options: SkillListOptions<'_>) -> Resu
                 println!("  {}", p.display());
             }
         } else {
-            for skill in &skills {
+            for (skill, _) in &skills {
                 println!("{}", skill.name);
             }
         }
     } else if options.json_output {
         let items: Vec<serde_json::Value> = skills
             .iter()
-            .map(|s| {
+            .map(|(s, metadata)| {
                 let mut value = serde_json::json!({
                     "name": s.name,
                     "description": s.frontmatter.description,
@@ -87,6 +95,37 @@ pub fn cmd_skills_list(paths: &[PathBuf], options: SkillListOptions<'_>) -> Resu
                     "references": s.references.iter().map(|r| &r.name).collect::<Vec<_>>(),
                     "source": s.source,
                 });
+                if let Some(metadata) = metadata {
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert(
+                            "managed".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        object.insert(
+                            "install_scope".to_string(),
+                            serde_json::Value::String(metadata.install_scope.clone()),
+                        );
+                        object.insert(
+                            "install_source".to_string(),
+                            serde_json::Value::String(metadata.source.clone()),
+                        );
+                        object.insert(
+                            "update_status".to_string(),
+                            serde_json::Value::String("updatable".to_string()),
+                        );
+                    }
+                } else if options.installed_only {
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert(
+                            "managed".to_string(),
+                            serde_json::Value::Bool(false),
+                        );
+                        object.insert(
+                            "update_status".to_string(),
+                            serde_json::Value::String("unmanaged".to_string()),
+                        );
+                    }
+                }
                 if options.no_descriptions {
                     if let Some(object) = value.as_object_mut() {
                         object.remove("description");
@@ -105,10 +144,16 @@ pub fn cmd_skills_list(paths: &[PathBuf], options: SkillListOptions<'_>) -> Resu
             println!("  {}", p.display());
         }
     } else {
-        for skill in &skills {
+        for (skill, metadata) in &skills {
             println!("{}", skill.name);
             if !options.no_descriptions && !skill.frontmatter.description.is_empty() {
                 println!("  {}", skill.frontmatter.description);
+            }
+            if let Some(metadata) = metadata {
+                println!(
+                    "  Managed: {} ({})",
+                    metadata.install_scope, metadata.source
+                );
             }
             if !skill.scripts.is_empty() {
                 let names: Vec<_> = skill.scripts.iter().map(|s| s.name.as_str()).collect();

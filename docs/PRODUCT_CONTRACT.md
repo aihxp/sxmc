@@ -66,6 +66,8 @@ These are the core product paths we should treat as stable:
 - `sxmc scaffold agent-doc --from-profile ...` is supported
 - `sxmc scaffold client-config --from-profile ...` is supported
 - `sxmc scaffold skill --from-profile ...` is supported
+- `sxmc skills install ...` supports project-local and user-global managed skill installs
+- `sxmc skills update ...` refreshes metadata-managed installed skills from their recorded source
 - `sxmc scaffold mcp-wrapper --from-profile ...` is supported
 - `sxmc scaffold llms-txt --from-profile ...` is supported as an optional export
 - host profiles are supported for:
@@ -92,6 +94,9 @@ These are the core product paths we should treat as stable:
 - `sxmc add --client ...` / `sxmc setup --client ...` and
   `sxmc doctor --host ...` / `sxmc status --host ...` are stable naming aliases
   for the primary host-selection flags
+- `sxmc skills list --installed --json` returns additive management metadata for
+  managed skills, including `managed`, `install_scope`, `install_source`, and
+  `update_status`
 
 ### 6. Stable Machine-Readable Contracts
 

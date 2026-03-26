@@ -97,6 +97,15 @@ sxmc skills info simple-skill --paths tests/fixtures
 sxmc skills info simple-skill --paths tests/fixtures --summary-only
 ```
 
+Install managed skills into project-local or user-level skill directories:
+
+```bash
+sxmc skills install tests/fixtures/simple-skill --root .
+sxmc skills list --installed --root . --json
+sxmc skills install https://github.com/openai/skills/tree/main/skills/.curated/example-skill --global
+sxmc skills update example-skill --global
+```
+
 Render a documentation-first skill body with argument interpolation:
 
 ```bash
@@ -117,6 +126,9 @@ sxmc skills run deploy-skill --paths /absolute/path/to/skills \
 
 Use `sxmc skills info --summary-only` when you want a leaner skill summary
 without the full Markdown body.
+
+Use `sxmc skills list --installed` when you want to see only metadata-managed
+skills that Sumac can refresh with `sxmc skills update`.
 
 ## Use MCP From The CLI
 

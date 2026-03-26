@@ -75,3 +75,18 @@ Current automated host coverage includes:
 - Cursor config merge
 - OpenAI/Codex TOML config insertion
 - optional `llms.txt` export
+
+## Managed Skill Install Coverage
+
+`sxmc` now supports metadata-managed skill installs in both scopes:
+
+- project-local installs via `sxmc skills install ... --root .`
+- user-global installs via `sxmc skills install ... --global`
+- metadata-backed refreshes via `sxmc skills update [name]`
+- managed inventory reads via `sxmc skills list --installed --json`
+
+Current automated coverage includes:
+
+- local install from a checked-out skill directory
+- local update from recorded source metadata
+- global install into the user skill directory

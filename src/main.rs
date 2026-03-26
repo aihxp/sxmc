@@ -49,7 +49,7 @@ use sxmc::paths::{InstallPaths, InstallScope};
 use sxmc::projection::{apply_offset_limit, retain_object_fields};
 use sxmc::security;
 use sxmc::server::{self, HttpServeLimits};
-use sxmc::skills::{discovery, generator, parser};
+use sxmc::skills::{discovery, generator, install as skill_install, parser};
 
 const PROFILE_BUNDLE_SCHEMA: &str = "sxmc_profile_bundle_v1";
 const PROFILE_CORPUS_SCHEMA: &str = "sxmc_profile_corpus_v1";
@@ -62,6 +62,10 @@ const BAKED_HEALTH_SLOW_MS: u64 = 1_000;
 
 fn resolve_paths(paths: Option<Vec<PathBuf>>) -> Vec<PathBuf> {
     paths.unwrap_or_else(discovery::default_paths)
+}
+
+fn resolve_skills_install_root(root: Option<PathBuf>) -> Option<PathBuf> {
+    Some(root.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))))
 }
 
 fn parse_kv_args(args: &[String]) -> serde_json::Map<String, serde_json::Value> {
@@ -8052,6 +8056,11 @@ async fn main() -> Result<()> {
         Commands::Skills { action } => match action {
             SkillsAction::List {
                 paths,
+                installed,
+                skills_path,
+                local,
+                global,
+                root,
                 json,
                 names_only,
                 counts_only,
@@ -8060,10 +8069,21 @@ async fn main() -> Result<()> {
                 offset,
                 limit,
             } => {
+                let resolved_paths = if installed {
+                    let install_paths = resolve_install_paths(
+                        resolve_skills_install_root(root),
+                        global,
+                        local,
+                    )?;
+                    vec![install_paths.resolve_skills_path(&skills_path)]
+                } else {
+                    resolve_paths(paths)
+                };
                 cmd_skills_list(
-                    &resolve_paths(paths),
+                    &resolved_paths,
                     SkillListOptions {
                         json_output: json,
+                        installed_only: installed,
                         names_only,
                         counts_only,
                         no_descriptions,
@@ -8107,6 +8127,54 @@ async fn main() -> Result<()> {
                 let skill_dir =
                     generator::generate_from_openapi(&source, &output_dir, &headers).await?;
                 println!("Generated skill at: {}", skill_dir.display());
+            }
+            SkillsAction::Install {
+                source,
+                path,
+                r#ref,
+                skills_path,
+                local,
+                global,
+                root,
+            } => {
+                let install_paths =
+                    resolve_install_paths(resolve_skills_install_root(root), global, local)?;
+                let report = skill_install::install_skill(skill_install::SkillInstallRequest {
+                    source: &source,
+                    repo_subpath: path.as_deref(),
+                    reference: r#ref.as_deref(),
+                    install_paths: &install_paths,
+                    skills_path: &skills_path,
+                })?;
+                println!(
+                    "Installed skill `{}` to {} ({})",
+                    report.name,
+                    report.target_dir.display(),
+                    report.install_scope.as_str()
+                );
+            }
+            SkillsAction::Update {
+                name,
+                skills_path,
+                local,
+                global,
+                root,
+            } => {
+                let install_paths =
+                    resolve_install_paths(resolve_skills_install_root(root), global, local)?;
+                let reports = skill_install::update_skills(skill_install::SkillUpdateRequest {
+                    name: name.as_deref(),
+                    install_paths: &install_paths,
+                    skills_path: &skills_path,
+                })?;
+                for report in reports {
+                    println!(
+                        "Updated skill `{}` at {} ({})",
+                        report.name,
+                        report.target_dir.display(),
+                        report.install_scope.as_str()
+                    );
+                }
             }
         },
 
