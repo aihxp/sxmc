@@ -56,6 +56,7 @@ official references listed below.
 ### Host Coverage Notes
 
 - `AGENTS.md` is the portable baseline, not the only target.
+- `setup`, `add`, `init ai`, `doctor`, `status`, `sync`, and `watch` support both project-local writes (default / `--local`) and user-level host installs (`--global`).
 - Full coverage is safest in `preview` or `write-sidecar` mode.
 - Full-coverage `apply` requires explicit `--host` selection.
 - Non-selected hosts remain sidecars during `apply`.

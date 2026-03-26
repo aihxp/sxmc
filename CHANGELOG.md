@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+
+- `sxmc setup`, `sxmc add`, `sxmc init ai`, `sxmc doctor`, `sxmc status`,
+  `sxmc sync`, and `sxmc watch` now support `--global` / `--local` install
+  scope selection for CLI -> AI host artifacts
+
+### Changed
+
+- global CLI -> AI installs now write host-native user files such as
+  `~/.claude/CLAUDE.md`, `~/.cursor/...`, and `~/.gemini/...` instead of
+  forcing repo-local startup files
+- global saved profiles and sync state now live under Sumac's config directory
+  instead of repo-local `.sxmc` state
+
 ## [1.0.7] - 2026-03-25
 
 ### Added

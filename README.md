@@ -22,6 +22,16 @@ sxmc status --human
 sxmc sync --root . --apply
 ```
 
+When you want user-level host files instead of repo-local files, switch the
+same workflow to `--global`:
+
+```bash
+sxmc setup --global
+sxmc add gh --global
+sxmc status --global --human
+sxmc sync --global --apply
+```
+
 What they mean:
 
 - `sxmc setup`: onboard the common tools a repo uses

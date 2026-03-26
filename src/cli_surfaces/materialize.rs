@@ -12,17 +12,14 @@ use crate::cli_surfaces::render::{
     render_mcp_wrapper_readme, render_portable_agent_doc, render_skill_markdown, slugify,
 };
 use crate::error::{Result, SxmcError};
+use crate::paths::InstallPaths;
 
 pub fn generate_profile_artifact(
     profile: &CliSurfaceProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Result<GeneratedArtifact> {
     let slug = slugify(&profile.command);
-    let target_path = root
-        .join(".sxmc")
-        .join("ai")
-        .join("profiles")
-        .join(format!("{slug}.json"));
+    let target_path = install_paths.profile_dir().join(format!("{slug}.json"));
     let content = serde_json::to_string_pretty(profile)?;
     Ok(GeneratedArtifact {
         label: "CLI profile".into(),
@@ -37,10 +34,12 @@ pub fn generate_profile_artifact(
 pub fn generate_agent_doc_artifact(
     profile: &CliSurfaceProfile,
     client: AiClientProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> GeneratedArtifact {
     let spec = host_profile_spec(client);
-    let target_path = root.join(spec.native_doc_target.unwrap_or("AGENTS.md"));
+    let target_path = install_paths
+        .host_doc_path(client)
+        .unwrap_or_else(|| install_paths.portable_agent_doc_path());
     let content = render_agent_doc(profile, client);
     GeneratedArtifact {
         label: format!("{} agent doc", spec.label),
@@ -54,11 +53,11 @@ pub fn generate_agent_doc_artifact(
 
 pub fn generate_portable_agent_doc_artifact(
     profile: &CliSurfaceProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> GeneratedArtifact {
     GeneratedArtifact {
         label: "Portable agent doc".into(),
-        target_path: root.join("AGENTS.md"),
+        target_path: install_paths.portable_agent_doc_path(),
         content: render_portable_agent_doc(profile),
         apply_strategy: ApplyStrategy::ManagedMarkdownBlock,
         audience: ArtifactAudience::Portable,
@@ -68,7 +67,7 @@ pub fn generate_portable_agent_doc_artifact(
 
 pub fn generate_host_native_agent_doc_artifacts(
     profile: &CliSurfaceProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Vec<GeneratedArtifact> {
     AI_HOST_SPECS
         .iter()
@@ -81,7 +80,9 @@ pub fn generate_host_native_agent_doc_artifacts(
         })
         .map(|spec| GeneratedArtifact {
             label: format!("{} agent doc", spec.label),
-            target_path: root.join(spec.native_doc_target.expect("checked above")),
+            target_path: install_paths
+                .host_doc_path(spec.client)
+                .expect("checked above"),
             content: render_agent_doc(profile, spec.client),
             apply_strategy: ApplyStrategy::ManagedMarkdownBlock,
             audience: ArtifactAudience::Client(spec.client),
@@ -92,16 +93,19 @@ pub fn generate_host_native_agent_doc_artifacts(
 
 pub fn generate_full_coverage_init_artifacts(
     profile: &CliSurfaceProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
     skills_path: &Path,
 ) -> Result<Vec<GeneratedArtifact>> {
-    let mut artifacts = vec![generate_profile_artifact(profile, root)?];
-    artifacts.push(generate_portable_agent_doc_artifact(profile, root));
-    artifacts.extend(generate_host_native_agent_doc_artifacts(profile, root));
+    let mut artifacts = vec![generate_profile_artifact(profile, install_paths)?];
+    artifacts.push(generate_portable_agent_doc_artifact(profile, install_paths));
+    artifacts.extend(generate_host_native_agent_doc_artifacts(
+        profile,
+        install_paths,
+    ));
 
     for spec in AI_HOST_SPECS {
         if let Some(artifact) =
-            generate_client_config_artifact(profile, spec.client, root, skills_path)
+            generate_client_config_artifact(profile, spec.client, install_paths, skills_path)
         {
             artifacts.push(artifact);
         }
@@ -113,16 +117,12 @@ pub fn generate_full_coverage_init_artifacts(
 pub fn generate_client_config_artifact(
     profile: &CliSurfaceProfile,
     client: AiClientProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
     skills_path: &Path,
 ) -> Option<GeneratedArtifact> {
     let spec = host_profile_spec(client);
-    let target_path = root.join(spec.native_config_target?);
-    let absolute_skills_path = if skills_path.is_absolute() {
-        skills_path.to_path_buf()
-    } else {
-        root.join(skills_path)
-    };
+    let target_path = install_paths.host_config_path(client)?;
+    let absolute_skills_path = install_paths.resolve_skills_path(skills_path);
     let server_name = format!("sxmc-cli-ai-{}", slugify(&profile.command));
     let content = render_client_config(client, &server_name, &absolute_skills_path);
     let apply_strategy = match spec.config_shape {
@@ -251,7 +251,7 @@ pub fn generate_llms_txt_artifact(profile: &CliSurfaceProfile, root: &Path) -> G
 pub fn materialize_artifacts(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
     for artifact in artifacts {
@@ -271,7 +271,8 @@ pub fn materialize_artifacts(
                 });
             }
             ArtifactMode::WriteSidecar => {
-                let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+                let path =
+                    install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
                 let status = write_with_status(&path, &artifact.content)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
@@ -281,7 +282,7 @@ pub fn materialize_artifacts(
                 });
             }
             ArtifactMode::Patch => {
-                println!("{}", render_patch_preview(artifact, root)?);
+                println!("{}", render_patch_preview(artifact, install_paths)?);
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
@@ -290,7 +291,7 @@ pub fn materialize_artifacts(
                 });
             }
             ArtifactMode::Apply => {
-                let (path, status) = apply_artifact(artifact, root)?;
+                let (path, status) = apply_artifact(artifact, install_paths)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path,
@@ -306,11 +307,11 @@ pub fn materialize_artifacts(
 pub fn preview_artifacts(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
     for artifact in artifacts {
-        let (path, status) = planned_artifact_write(artifact, mode, root)?;
+        let (path, status) = planned_artifact_write(artifact, mode, install_paths)?;
         outcomes.push(WriteOutcome {
             label: artifact.label.clone(),
             path,
@@ -324,7 +325,7 @@ pub fn preview_artifacts(
 pub fn materialize_artifacts_with_apply_selection(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
     selected_clients: &[AiClientProfile],
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
@@ -354,7 +355,7 @@ pub fn materialize_artifacts_with_apply_selection(
         outcomes.extend(materialize_artifacts(
             std::slice::from_ref(artifact),
             effective_mode,
-            root,
+            install_paths,
         )?);
     }
     Ok(outcomes)
@@ -363,7 +364,7 @@ pub fn materialize_artifacts_with_apply_selection(
 pub fn preview_artifacts_with_apply_selection(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
     selected_clients: &[AiClientProfile],
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
@@ -393,7 +394,7 @@ pub fn preview_artifacts_with_apply_selection(
         outcomes.extend(preview_artifacts(
             std::slice::from_ref(artifact),
             effective_mode,
-            root,
+            install_paths,
         )?);
     }
     Ok(outcomes)
@@ -402,7 +403,7 @@ pub fn preview_artifacts_with_apply_selection(
 pub fn remove_artifacts(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
     for artifact in artifacts {
@@ -421,7 +422,8 @@ pub fn remove_artifacts(
                 });
             }
             ArtifactMode::WriteSidecar => {
-                let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+                let path =
+                    install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
                 remove_path_if_exists(&path)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
@@ -431,7 +433,7 @@ pub fn remove_artifacts(
                 });
             }
             ArtifactMode::Patch => {
-                println!("{}", render_remove_patch_preview(artifact, root)?);
+                println!("{}", render_remove_patch_preview(artifact, install_paths)?);
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path: artifact.target_path.clone(),
@@ -440,7 +442,7 @@ pub fn remove_artifacts(
                 });
             }
             ArtifactMode::Apply => {
-                let path = remove_artifact(artifact, root)?;
+                let path = remove_artifact(artifact, install_paths)?;
                 outcomes.push(WriteOutcome {
                     label: artifact.label.clone(),
                     path,
@@ -456,7 +458,7 @@ pub fn remove_artifacts(
 pub fn remove_artifacts_with_apply_selection(
     artifacts: &[GeneratedArtifact],
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
     selected_clients: &[AiClientProfile],
 ) -> Result<Vec<WriteOutcome>> {
     let mut outcomes = Vec::new();
@@ -486,31 +488,22 @@ pub fn remove_artifacts_with_apply_selection(
         outcomes.extend(remove_artifacts(
             std::slice::from_ref(artifact),
             effective_mode,
-            root,
+            install_paths,
         )?);
     }
     Ok(outcomes)
 }
 
-fn sidecar_path(scope: &str, root: &Path, original_target: &Path) -> PathBuf {
-    let file_name = original_target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("artifact.txt");
-    let sidecar_name = format!("{}.sxmc.snippet", file_name);
-    root.join(".sxmc")
-        .join("ai")
-        .join(slugify(scope))
-        .join(sidecar_name)
-}
-
-fn render_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Result<String> {
+fn render_patch_preview(
+    artifact: &GeneratedArtifact,
+    install_paths: &InstallPaths,
+) -> Result<String> {
     let existing = if artifact.target_path.exists() {
         fs::read_to_string(&artifact.target_path)?
     } else {
         String::new()
     };
-    let proposed = proposed_applied_content(artifact, root)?;
+    let proposed = proposed_applied_content(artifact, install_paths)?;
     Ok(format!(
         "--- {}\n+++ {}\n{}\n",
         artifact.target_path.display(),
@@ -519,13 +512,16 @@ fn render_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Result<Str
     ))
 }
 
-fn render_remove_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Result<String> {
+fn render_remove_patch_preview(
+    artifact: &GeneratedArtifact,
+    install_paths: &InstallPaths,
+) -> Result<String> {
     let existing = if artifact.target_path.exists() {
         fs::read_to_string(&artifact.target_path)?
     } else {
         String::new()
     };
-    let proposed = proposed_removed_content(artifact, root)?;
+    let proposed = proposed_removed_content(artifact, install_paths)?;
     Ok(format!(
         "--- {}\n+++ {}\n{}\n",
         artifact.target_path.display(),
@@ -534,7 +530,10 @@ fn render_remove_patch_preview(artifact: &GeneratedArtifact, root: &Path) -> Res
     ))
 }
 
-fn proposed_applied_content(artifact: &GeneratedArtifact, _root: &Path) -> Result<String> {
+fn proposed_applied_content(
+    artifact: &GeneratedArtifact,
+    _install_paths: &InstallPaths,
+) -> Result<String> {
     match artifact.apply_strategy {
         ApplyStrategy::ManagedMarkdownBlock => {
             let existing = if artifact.target_path.exists() {
@@ -573,10 +572,13 @@ fn proposed_applied_content(artifact: &GeneratedArtifact, _root: &Path) -> Resul
     }
 }
 
-fn proposed_removed_content(artifact: &GeneratedArtifact, root: &Path) -> Result<String> {
+fn proposed_removed_content(
+    artifact: &GeneratedArtifact,
+    install_paths: &InstallPaths,
+) -> Result<String> {
     match artifact.apply_strategy {
         ApplyStrategy::SidecarOnly => {
-            let _path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            let _path = install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
             Ok(String::new())
         }
         ApplyStrategy::ManagedMarkdownBlock => {
@@ -630,10 +632,13 @@ fn render_patch_body(existing: &str, proposed: &str) -> String {
     body
 }
 
-fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<(PathBuf, WriteStatus)> {
+fn apply_artifact(
+    artifact: &GeneratedArtifact,
+    install_paths: &InstallPaths,
+) -> Result<(PathBuf, WriteStatus)> {
     match artifact.apply_strategy {
         ApplyStrategy::SidecarOnly => {
-            let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            let path = install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
             let status = write_with_status(&path, &artifact.content)?;
             Ok((path, status))
         }
@@ -682,27 +687,28 @@ fn apply_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<(PathBuf,
 fn planned_artifact_write(
     artifact: &GeneratedArtifact,
     mode: ArtifactMode,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Result<(PathBuf, WriteStatus)> {
     match mode {
         ArtifactMode::Preview | ArtifactMode::Patch => {
             Ok((artifact.target_path.clone(), WriteStatus::Skipped))
         }
         ArtifactMode::WriteSidecar => {
-            let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            let path = install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
             let status = planned_write_status(&path, &artifact.content)?;
             Ok((path, status))
         }
         ArtifactMode::Apply => match artifact.apply_strategy {
             ApplyStrategy::SidecarOnly => {
-                let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+                let path =
+                    install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
                 let status = planned_write_status(&path, &artifact.content)?;
                 Ok((path, status))
             }
             ApplyStrategy::ManagedMarkdownBlock
             | ApplyStrategy::JsonMcpConfig
             | ApplyStrategy::TomlManagedBlock => {
-                let proposed = proposed_applied_content(artifact, root)?;
+                let proposed = proposed_applied_content(artifact, install_paths)?;
                 let status = planned_write_status(&artifact.target_path, &proposed)?;
                 Ok((artifact.target_path.clone(), status))
             }
@@ -714,10 +720,10 @@ fn planned_artifact_write(
     }
 }
 
-fn remove_artifact(artifact: &GeneratedArtifact, root: &Path) -> Result<PathBuf> {
+fn remove_artifact(artifact: &GeneratedArtifact, install_paths: &InstallPaths) -> Result<PathBuf> {
     match artifact.apply_strategy {
         ApplyStrategy::SidecarOnly => {
-            let path = sidecar_path(&artifact.sidecar_scope, root, &artifact.target_path);
+            let path = install_paths.sidecar_path(&artifact.sidecar_scope, &artifact.target_path);
             remove_path_if_exists(&path)?;
             Ok(path)
         }
@@ -970,6 +976,7 @@ mod tests {
 
     use super::*;
     use crate::cli_surfaces::model::{AI_HOST_SPECS, CLI_AI_HOSTS_LAST_VERIFIED};
+    use crate::paths::InstallPaths;
 
     #[test]
     fn merge_markdown_block_preserves_existing_content() {
@@ -1043,11 +1050,12 @@ mod tests {
         let profile: CliSurfaceProfile =
             serde_json::from_str(include_str!("../../examples/profiles/from_cli.json")).unwrap();
         let root = tempdir().unwrap();
+        let install_paths = InstallPaths::local(root.path().to_path_buf());
         let skills_path = root.path().join(".claude/skills");
 
         for spec in AI_HOST_SPECS {
             if let Some(artifact) =
-                generate_client_config_artifact(&profile, spec.client, root.path(), &skills_path)
+                generate_client_config_artifact(&profile, spec.client, &install_paths, &skills_path)
             {
                 assert!(
                     !artifact.content.is_empty(),
@@ -1070,6 +1078,7 @@ mod tests {
     #[test]
     fn sidecar_write_keeps_real_doc_untouched() {
         let root = tempdir().unwrap();
+        let install_paths = InstallPaths::local(root.path().to_path_buf());
         let target = root.path().join("AGENTS.md");
         fs::write(&target, "Existing").unwrap();
         let artifact = GeneratedArtifact {
@@ -1082,7 +1091,7 @@ mod tests {
         };
 
         let outcomes =
-            materialize_artifacts(&[artifact], ArtifactMode::WriteSidecar, root.path()).unwrap();
+            materialize_artifacts(&[artifact], ArtifactMode::WriteSidecar, &install_paths).unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "Existing");
         assert_eq!(outcomes.len(), 1);
         assert!(outcomes[0].path.to_string_lossy().contains(".sxmc"));

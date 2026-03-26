@@ -43,12 +43,23 @@ sxmc add gh --root .
 sxmc sync --root . --apply
 ```
 
+If you want host-native user files instead of project files, use the same loop
+with `--global`:
+
+```bash
+sxmc setup --global
+sxmc status --global --human
+sxmc add gh --global
+sxmc sync --global --apply
+```
+
 What each command does:
 
 - `sxmc setup` discovers common installed tools and prepares host-facing docs/config
 - `sxmc status` shows configured hosts, stale knowledge, recovery hints, and sync state
 - `sxmc add <tool>` teaches Sumac and your AI hosts one additional CLI
 - `sxmc sync --apply` refreshes derived state after tools or profiles change
+- add `--global` when you want `CLAUDE.md`, `AGENTS.md`, Cursor rules/config, and related host artifacts written into user-level host locations instead of the repo
 
 ## Serve Skills As MCP
 

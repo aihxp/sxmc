@@ -45,6 +45,7 @@ use sxmc::client::{api, codebase, database, graphql, mcp_http, mcp_stdio, openap
 use sxmc::discovery_snapshots;
 use sxmc::error::Result;
 use sxmc::output;
+use sxmc::paths::{InstallPaths, InstallScope};
 use sxmc::projection::{apply_offset_limit, retain_object_fields};
 use sxmc::security;
 use sxmc::server::{self, HttpServeLimits};
@@ -1305,6 +1306,26 @@ fn resolve_generation_root(root: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
+fn resolve_install_paths(
+    root: Option<PathBuf>,
+    global: bool,
+    _local: bool,
+) -> Result<InstallPaths> {
+    let project_root = resolve_generation_root(root)?;
+    Ok(if global {
+        InstallPaths::global(project_root)
+    } else {
+        InstallPaths::local(project_root)
+    })
+}
+
+fn scope_command_hint(install_paths: &InstallPaths) -> String {
+    match install_paths.scope() {
+        InstallScope::Local => format!("--root {}", install_paths.project_root().display()),
+        InstallScope::Global => "--global".into(),
+    }
+}
+
 fn doctor_target_key_for_host(client: AiClientProfile, config: bool) -> &'static str {
     match (client, config) {
         (AiClientProfile::ClaudeCode, false) => "claude_code",
@@ -1335,74 +1356,58 @@ fn doctor_target_key_for_host(client: AiClientProfile, config: bool) -> &'static
 }
 
 fn doctor_startup_targets(
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
 ) -> Vec<(String, PathBuf)> {
     if only_hosts.is_empty() {
-        return vec![
-            ("portable_agent_doc".into(), root.join("AGENTS.md")),
-            ("claude_code".into(), root.join("CLAUDE.md")),
-            ("gemini_cli".into(), root.join("GEMINI.md")),
-            (
-                "cursor_rules".into(),
-                root.join(".cursor").join("rules").join("sxmc-cli-ai.md"),
-            ),
-            (
-                "github_copilot".into(),
-                root.join(".github").join("copilot-instructions.md"),
-            ),
-            (
-                "continue_dev".into(),
-                root.join(".continue").join("rules").join("sxmc-cli-ai.md"),
-            ),
-            ("open_code".into(), root.join("opencode.json")),
-            (
-                "jetbrains_ai_assistant".into(),
-                root.join(".aiassistant")
-                    .join("rules")
-                    .join("sxmc-cli-ai.md"),
-            ),
-            ("junie".into(), root.join(".junie").join("guidelines.md")),
-            (
-                "windsurf".into(),
-                root.join(".windsurf").join("rules").join("sxmc-cli-ai.md"),
-            ),
-            ("openai_codex_agent_doc".into(), root.join("AGENTS.md")),
-            (
-                "openai_codex_mcp".into(),
-                root.join(".codex").join("mcp.toml"),
-            ),
-            ("cursor_mcp".into(), root.join(".cursor").join("mcp.json")),
-            (
-                "gemini_mcp".into(),
-                root.join(".gemini").join("settings.json"),
-            ),
-        ];
+        let mut targets = vec![(
+            "portable_agent_doc".into(),
+            install_paths.portable_agent_doc_path(),
+        )];
+        for host in resolved_hosts(only_hosts) {
+            let spec = cli_surfaces::host_profile_spec(host);
+            if let Some(path) = install_paths.host_doc_path(host) {
+                let is_shared_portable = matches!(
+                    host,
+                    AiClientProfile::OpenCode
+                        | AiClientProfile::OpenaiCodex
+                        | AiClientProfile::GenericStdioMcp
+                        | AiClientProfile::GenericHttpMcp
+                ) && path == install_paths.portable_agent_doc_path();
+                if !is_shared_portable {
+                    targets.push((doctor_target_key_for_host(host, false).into(), path));
+                }
+            }
+            if spec.native_config_target.is_some() {
+                if let Some(path) = install_paths.host_config_path(host) {
+                    targets.push((doctor_target_key_for_host(host, true).into(), path));
+                }
+            }
+        }
+        return targets;
     }
 
     let mut targets = Vec::new();
     for host in only_hosts {
         let spec = cli_surfaces::host_profile_spec(*host);
-        if let Some(path) = spec.native_doc_target {
-            targets.push((
-                doctor_target_key_for_host(*host, false).into(),
-                root.join(path),
-            ));
+        if spec.native_doc_target.is_some() {
+            if let Some(path) = install_paths.host_doc_path(*host) {
+                targets.push((doctor_target_key_for_host(*host, false).into(), path));
+            }
         }
-        if let Some(path) = spec.native_config_target {
-            targets.push((
-                doctor_target_key_for_host(*host, true).into(),
-                root.join(path),
-            ));
+        if spec.native_config_target.is_some() {
+            if let Some(path) = install_paths.host_config_path(*host) {
+                targets.push((doctor_target_key_for_host(*host, true).into(), path));
+            }
         }
     }
     targets
 }
 
-fn doctor_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Result<Value> {
+fn doctor_value(install_paths: &InstallPaths, only_hosts: &[AiClientProfile]) -> Result<Value> {
     let bake_store = BakeStore::load()?;
     let cache_stats = sxmc::cache::Cache::new(60 * 60 * 24 * 14)?.stats()?;
-    let startup_targets = doctor_startup_targets(root, only_hosts);
+    let startup_targets = doctor_startup_targets(install_paths, only_hosts);
 
     let startup_files = startup_targets
         .into_iter()
@@ -1418,15 +1423,17 @@ fn doctor_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
         .collect::<serde_json::Map<_, _>>();
 
     Ok(json!({
-        "root": root.display().to_string(),
+        "root": install_paths.project_root().display().to_string(),
+        "install_scope": install_paths.scope().as_str(),
+        "state_root": install_paths.state_root().display().to_string(),
         "checked_hosts": only_hosts
             .iter()
             .map(|host| cli_surfaces::host_profile_spec(*host).sidecar_scope)
             .collect::<Vec<_>>(),
         "baked_mcp_servers": bake_store.list().len(),
         "portable_profile_dir": {
-            "path": root.join(".sxmc").join("ai").join("profiles").display().to_string(),
-            "present": root.join(".sxmc").join("ai").join("profiles").exists(),
+            "path": install_paths.profile_dir().display().to_string(),
+            "present": install_paths.profile_dir().exists(),
         },
         "cache": {
             "path": cache_stats.path.display().to_string(),
@@ -1475,12 +1482,47 @@ fn doctor_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
     }))
 }
 
-fn default_saved_profiles_dir(root: &std::path::Path) -> PathBuf {
-    root.join(".sxmc").join("ai").join("profiles")
+trait InstallRootLike {
+    fn saved_profiles_dir(&self) -> PathBuf;
+    fn sync_state_path(&self) -> PathBuf;
 }
 
-fn default_sync_state_path(root: &std::path::Path) -> PathBuf {
-    root.join(".sxmc").join("state.json")
+impl InstallRootLike for Path {
+    fn saved_profiles_dir(&self) -> PathBuf {
+        self.join(".sxmc").join("ai").join("profiles")
+    }
+
+    fn sync_state_path(&self) -> PathBuf {
+        self.join(".sxmc").join("state.json")
+    }
+}
+
+impl InstallRootLike for PathBuf {
+    fn saved_profiles_dir(&self) -> PathBuf {
+        self.as_path().saved_profiles_dir()
+    }
+
+    fn sync_state_path(&self) -> PathBuf {
+        self.as_path().sync_state_path()
+    }
+}
+
+impl InstallRootLike for InstallPaths {
+    fn saved_profiles_dir(&self) -> PathBuf {
+        self.profile_dir()
+    }
+
+    fn sync_state_path(&self) -> PathBuf {
+        self.sync_state_path()
+    }
+}
+
+fn default_saved_profiles_dir(root: &impl InstallRootLike) -> PathBuf {
+    root.saved_profiles_dir()
+}
+
+fn default_sync_state_path(root: &impl InstallRootLike) -> PathBuf {
+    root.sync_state_path()
 }
 
 fn bundle_slug(input: &str) -> String {
@@ -2311,9 +2353,9 @@ fn drift_value(profile_paths: &[PathBuf], allow_self: bool) -> Value {
     })
 }
 
-fn status_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Result<Value> {
-    let mut value = doctor_value(root, only_hosts)?;
-    let profile_dir = default_saved_profiles_dir(root);
+fn status_value(install_paths: &InstallPaths, only_hosts: &[AiClientProfile]) -> Result<Value> {
+    let mut value = doctor_value(install_paths, only_hosts)?;
+    let profile_dir = default_saved_profiles_dir(install_paths);
     let (drift, inventory) = if profile_dir.exists() {
         let paths = collect_profile_paths(std::slice::from_ref(&profile_dir), true)?;
         let inventory = saved_profile_inventory_value(&paths);
@@ -2353,7 +2395,10 @@ fn status_value(root: &std::path::Path, only_hosts: &[AiClientProfile]) -> Resul
                 "inventory": inventory,
             }),
         );
-        object.insert("sync_state".into(), sync_state_summary_value(root, &drift));
+        object.insert(
+            "sync_state".into(),
+            sync_state_summary_value(install_paths, &drift),
+        );
     }
     Ok(value)
 }
@@ -3399,20 +3444,20 @@ fn registry_pull_value(
 }
 
 fn host_capability_map(
-    root: &Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
 ) -> serde_json::Map<String, Value> {
     let hosts = resolved_hosts(only_hosts);
     let mut summary = serde_json::Map::new();
     for host in hosts {
         let spec = cli_surfaces::host_profile_spec(host);
-        let doc_present = spec
-            .native_doc_target
-            .map(|path| root.join(path).exists())
+        let doc_present = install_paths
+            .host_doc_path(host)
+            .map(|path| path.exists())
             .unwrap_or(false);
-        let config_present = spec
-            .native_config_target
-            .map(|path| root.join(path).exists())
+        let config_present = install_paths
+            .host_config_path(host)
+            .map(|path| path.exists())
             .unwrap_or(false);
         summary.insert(
             spec.sidecar_scope.into(),
@@ -3427,8 +3472,8 @@ fn host_capability_map(
     summary
 }
 
-fn host_capability_value(root: &Path, only_hosts: &[AiClientProfile]) -> Value {
-    Value::Object(host_capability_map(root, only_hosts))
+fn host_capability_value(install_paths: &InstallPaths, only_hosts: &[AiClientProfile]) -> Value {
+    Value::Object(host_capability_map(install_paths, only_hosts))
 }
 
 fn first_profile_command(inventory: &Value) -> Option<String> {
@@ -3443,13 +3488,13 @@ fn first_profile_command(inventory: &Value) -> Option<String> {
 }
 
 fn ai_knowledge_value(
-    root: &Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
     inventory: &Value,
     drift: &Value,
 ) -> Value {
     let hosts = resolved_hosts(only_hosts);
-    let capability_map = host_capability_map(root, &hosts);
+    let capability_map = host_capability_map(install_paths, &hosts);
     let profile_count = inventory["count"].as_u64().unwrap_or(0);
     let ready_profile_count = inventory["ready_count"].as_u64().unwrap_or(0);
     let stale_profile_count = inventory["stale_count"].as_u64().unwrap_or(0);
@@ -3552,7 +3597,7 @@ fn ai_knowledge_value(
             .clone()
             .unwrap_or_else(|| "<tool>".to_string());
         let recommended_commands = host_recommended_commands(
-            root,
+            install_paths,
             key,
             state,
             &command_hint,
@@ -3593,7 +3638,11 @@ fn ai_knowledge_value(
     })
 }
 
-fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value, sync_state: &Value) -> Value {
+fn status_recovery_plan_value(
+    install_paths: &InstallPaths,
+    ai_knowledge: &Value,
+    sync_state: &Value,
+) -> Value {
     let mut items = Vec::new();
     if let Some(hosts) = ai_knowledge["hosts"].as_object() {
         let mut entries = hosts.iter().collect::<Vec<_>>();
@@ -3607,7 +3656,11 @@ fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value, sync_state: &Va
                 .as_str()
                 .map(str::to_string)
                 .unwrap_or_else(|| {
-                    format!("sxmc add <tool> --host {} --root {}", key, root.display())
+                    format!(
+                        "sxmc add <tool> {} --host {}",
+                        scope_command_hint(install_paths),
+                        key
+                    )
                 });
             let alternatives = details["recommended_commands"]
                 .as_array()
@@ -3639,7 +3692,7 @@ fn status_recovery_plan_value(root: &Path, ai_knowledge: &Value, sync_state: &Va
                 "{} saved profile(s) drifted from the installed tools.",
                 sync_state["current_drift_count"].as_u64().unwrap_or(0)
             ),
-            "command": format!("sxmc sync --root {} --apply", root.display()),
+            "command": format!("sxmc sync {} --apply", scope_command_hint(install_paths)),
         }));
     }
     json!({
@@ -3659,7 +3712,7 @@ fn recovery_plan_attributes(state: &str) -> (u64, &'static str, &'static str) {
 }
 
 fn host_recommended_commands(
-    root: &Path,
+    install_paths: &InstallPaths,
     host_key: &str,
     state: &str,
     command_hint: &str,
@@ -3667,33 +3720,24 @@ fn host_recommended_commands(
     config_present: bool,
     missing_targets: &[&str],
 ) -> Vec<Value> {
+    let scope_hint = scope_command_hint(install_paths);
     let setup_command = format!(
-        "sxmc setup --tool {} --host {} --root {}",
-        command_hint,
-        host_key,
-        root.display()
+        "sxmc setup --tool {} --host {} {}",
+        command_hint, host_key, scope_hint
     );
     let add_command = format!(
-        "sxmc add {} --host {} --root {}",
-        command_hint,
-        host_key,
-        root.display()
+        "sxmc add {} --host {} {}",
+        command_hint, host_key, scope_hint
     );
-    let sync_command = format!("sxmc sync --root {} --apply", root.display());
+    let sync_command = format!("sxmc sync {} --apply", scope_hint);
     let drift_command = format!(
         "sxmc inspect drift {} --recursive --format json-pretty",
-        default_saved_profiles_dir(root).display()
+        default_saved_profiles_dir(install_paths).display()
     );
-    let doctor_command = format!(
-        "sxmc doctor --fix --root {} --only {}",
-        root.display(),
-        host_key
-    );
+    let doctor_command = format!("sxmc doctor --fix {} --only {}", scope_hint, host_key);
     let allow_low_confidence_command = format!(
-        "sxmc add {} --host {} --root {} --allow-low-confidence",
-        command_hint,
-        host_key,
-        root.display()
+        "sxmc add {} --host {} {} --allow-low-confidence",
+        command_hint, host_key, scope_hint
     );
     let partially_configured = (doc_present || config_present) && !missing_targets.is_empty();
 
@@ -3790,11 +3834,12 @@ fn host_recommended_commands(
     }
 }
 
-fn watch_event_value(root: &Path, reason: &str, value: &Value) -> Value {
+fn watch_event_value(install_paths: &InstallPaths, reason: &str, value: &Value) -> Value {
     json!({
         "event_schema": "sxmc_watch_event_v1",
         "reason": reason,
-        "root": root.display().to_string(),
+        "root": install_paths.project_root().display().to_string(),
+        "install_scope": install_paths.scope().as_str(),
         "observed_at": Utc::now().to_rfc3339(),
         "status": value,
     })
@@ -3962,9 +4007,12 @@ async fn send_watch_webhook(url: &str, headers: &[(String, String)], event: &Val
     Ok(())
 }
 
-fn compare_host_capabilities(root: &Path, compare_hosts: &[AiClientProfile]) -> Value {
+fn compare_host_capabilities(
+    install_paths: &InstallPaths,
+    compare_hosts: &[AiClientProfile],
+) -> Value {
     let hosts = resolved_hosts(compare_hosts);
-    let capability_map = host_capability_map(root, &hosts);
+    let capability_map = host_capability_map(install_paths, &hosts);
     let mut differences = Vec::new();
     for field in ["ready", "doc_present", "config_present"] {
         let mut truthy = Vec::new();
@@ -4167,14 +4215,14 @@ fn status_has_unhealthy_baked_health(value: &Value) -> bool {
 }
 
 async fn status_value_with_health(
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
     compare_hosts: &[AiClientProfile],
     include_health: bool,
 ) -> Result<Value> {
-    let mut value = status_value(root, only_hosts)?;
+    let mut value = status_value(install_paths, only_hosts)?;
     if let Some(object) = value.as_object_mut() {
-        let host_capabilities = host_capability_value(root, only_hosts);
+        let host_capabilities = host_capability_value(install_paths, only_hosts);
         object.insert("host_capabilities".into(), host_capabilities);
         let saved_profiles = object
             .get("saved_profiles")
@@ -4188,18 +4236,18 @@ async fn status_value_with_health(
             .get("drift")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let ai_knowledge = ai_knowledge_value(root, only_hosts, &inventory, &drift);
+        let ai_knowledge = ai_knowledge_value(install_paths, only_hosts, &inventory, &drift);
         object.insert("ai_knowledge".into(), ai_knowledge.clone());
-        let sync_state = sync_state_summary_value(root, &drift);
+        let sync_state = sync_state_summary_value(install_paths, &drift);
         object.insert("sync_state".into(), sync_state.clone());
         object.insert(
             "recovery_plan".into(),
-            status_recovery_plan_value(root, &ai_knowledge, &sync_state),
+            status_recovery_plan_value(install_paths, &ai_knowledge, &sync_state),
         );
         if compare_hosts.len() >= 2 {
             object.insert(
                 "host_capability_diff".into(),
-                compare_host_capabilities(root, compare_hosts),
+                compare_host_capabilities(install_paths, compare_hosts),
             );
         }
         if include_health {
@@ -4259,6 +4307,9 @@ fn format_doctor_report(value: &Value) -> String {
         "Root: {}",
         value["root"].as_str().unwrap_or("<unknown>")
     ));
+    if let Some(scope) = value["install_scope"].as_str() {
+        lines.push(format!("Install scope: {}", scope));
+    }
     if !checked_hosts.is_empty() {
         lines.push(format!("Checked hosts: {}", checked_hosts));
     }
@@ -6108,8 +6159,8 @@ fn commands_needing_sync(drift: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn sync_state_summary_value(root: &Path, drift: &Value) -> Value {
-    let path = default_sync_state_path(root);
+fn sync_state_summary_value(install_paths: &InstallPaths, drift: &Value) -> Value {
+    let path = default_sync_state_path(install_paths);
     let current_drift = drift["changed_count"].as_u64().unwrap_or(0);
     let commands = commands_needing_sync(drift);
     if let Some(state) = load_sync_state_value(&path) {
@@ -6142,7 +6193,7 @@ fn sync_state_summary_value(root: &Path, drift: &Value) -> Value {
 }
 
 struct AddResultContext<'a> {
-    root: &'a Path,
+    install_paths: &'a InstallPaths,
     command: &'a str,
     profile: &'a cli_surfaces::CliSurfaceProfile,
     hosts: &'a [AiClientProfile],
@@ -6156,7 +6207,8 @@ fn add_result_value(ctx: AddResultContext<'_>) -> Value {
     json!({
         "command": "add",
         "tool": ctx.command,
-        "root": ctx.root.display().to_string(),
+        "root": ctx.install_paths.project_root().display().to_string(),
+        "install_scope": ctx.install_paths.scope().as_str(),
         "effective_mode": if ctx.auto_previewed_due_to_missing_hosts || ctx.preview_requested { "preview" } else { "apply" },
         "preview_requested": ctx.preview_requested,
         "auto_previewed_due_to_missing_hosts": ctx.auto_previewed_due_to_missing_hosts,
@@ -6167,9 +6219,9 @@ fn add_result_value(ctx: AddResultContext<'_>) -> Value {
         "outcome_summary": write_outcome_summary_value(ctx.outcomes),
         "recommended_command": if ctx.hosts.is_empty() {
             Value::from(format!(
-                "sxmc add {} --root {} --host claude-code",
+                "sxmc add {} {} --host claude-code",
                 ctx.command,
-                ctx.root.display()
+                scope_command_hint(ctx.install_paths)
             ))
         } else {
             Value::Null
@@ -6271,7 +6323,7 @@ fn project_discovery_value(
     value
 }
 struct SetupResultContext<'a> {
-    root: &'a Path,
+    install_paths: &'a InstallPaths,
     tools: &'a [String],
     tool_results: &'a [Value],
     auto_detected_tools: bool,
@@ -6297,7 +6349,8 @@ fn setup_result_value(ctx: SetupResultContext<'_>) -> Value {
     json!({
         "command": "setup",
         "tools": ctx.tools,
-        "root": ctx.root.display().to_string(),
+        "root": ctx.install_paths.project_root().display().to_string(),
+        "install_scope": ctx.install_paths.scope().as_str(),
         "effective_mode": if ctx.auto_previewed_due_to_missing_hosts || ctx.preview_requested { "preview" } else { "apply" },
         "preview_requested": ctx.preview_requested,
         "auto_previewed_due_to_missing_hosts": ctx.auto_previewed_due_to_missing_hosts,
@@ -6314,9 +6367,9 @@ fn setup_result_value(ctx: SetupResultContext<'_>) -> Value {
         },
         "recommended_command": if ctx.hosts.is_empty() {
             Value::from(format!(
-                "sxmc setup --tool {} --root {} --host claude-code",
+                "sxmc setup --tool {} {} --host claude-code",
                 ctx.tools.join(","),
-                ctx.root.display()
+                scope_command_hint(ctx.install_paths)
             ))
         } else {
             Value::Null
@@ -6491,7 +6544,7 @@ fn ensure_profile_ready_for_agent_docs(
 }
 
 struct DoctorRepairOptions<'a> {
-    root: &'a std::path::Path,
+    install_paths: &'a InstallPaths,
     only_hosts: &'a [AiClientProfile],
     from_cli: &'a str,
     depth: usize,
@@ -6511,13 +6564,13 @@ fn extract_managed_cli_command(text: &str) -> Option<String> {
 }
 
 fn infer_doctor_hosts(
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
 ) -> Result<Vec<AiClientProfile>> {
     if !only_hosts.is_empty() {
         return Ok(only_hosts.to_vec());
     }
-    let detected = auto_detect_add_hosts(root);
+    let detected = auto_detect_add_hosts(install_paths);
     if detected.is_empty() {
         return Err(sxmc::error::SxmcError::Other(
             "Could not infer which AI hosts to repair. Re-run with `--only <host>` or create host files first with `sxmc add <tool>`.".into(),
@@ -6527,7 +6580,7 @@ fn infer_doctor_hosts(
 }
 
 fn infer_doctor_from_cli(
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
     explicit: Option<&str>,
 ) -> Result<String> {
@@ -6536,7 +6589,7 @@ fn infer_doctor_from_cli(
     }
 
     let mut commands = std::collections::BTreeSet::new();
-    for (_, path) in doctor_startup_targets(root, only_hosts) {
+    for (_, path) in doctor_startup_targets(install_paths, only_hosts) {
         if path.exists() {
             if let Ok(contents) = fs::read_to_string(&path) {
                 if let Some(command) = extract_managed_cli_command(&contents) {
@@ -6549,7 +6602,7 @@ fn infer_doctor_from_cli(
         return Ok(commands.into_iter().next().unwrap());
     }
 
-    let profile_dir = default_saved_profiles_dir(root);
+    let profile_dir = default_saved_profiles_dir(install_paths);
     if profile_dir.exists() {
         let profile_paths = collect_profile_paths(std::slice::from_ref(&profile_dir), true)?;
         let mut profile_commands = std::collections::BTreeSet::new();
@@ -6573,14 +6626,14 @@ fn infer_doctor_from_cli(
 fn repair_doctor_startup_files(
     options: DoctorRepairOptions<'_>,
 ) -> Result<Vec<cli_surfaces::WriteOutcome>> {
-    let selected_hosts = infer_doctor_hosts(options.root, options.only_hosts)?;
+    let selected_hosts = infer_doctor_hosts(options.install_paths, options.only_hosts)?;
     let profile = cli_surfaces::inspect_cli_with_depth(options.from_cli, true, options.depth)?;
     let (artifacts, selected_hosts) = resolve_cli_ai_init_artifacts(
         &profile,
         AiCoverage::Full,
         None,
         &selected_hosts,
-        options.root,
+        options.install_paths,
         options.skills_path,
         ArtifactMode::Apply,
     )?;
@@ -6589,14 +6642,14 @@ fn repair_doctor_startup_files(
             cli_surfaces::remove_artifacts_with_apply_selection(
                 &artifacts,
                 ArtifactMode::Preview,
-                options.root,
+                options.install_paths,
                 &selected_hosts,
             )
         } else {
             cli_surfaces::remove_artifacts_with_apply_selection(
                 &artifacts,
                 ArtifactMode::Apply,
-                options.root,
+                options.install_paths,
                 &selected_hosts,
             )
         }
@@ -6606,14 +6659,14 @@ fn repair_doctor_startup_files(
             cli_surfaces::preview_artifacts_with_apply_selection(
                 &artifacts,
                 ArtifactMode::Apply,
-                options.root,
+                options.install_paths,
                 &selected_hosts,
             )
         } else {
             cli_surfaces::materialize_artifacts_with_apply_selection(
                 &artifacts,
                 ArtifactMode::Apply,
-                options.root,
+                options.install_paths,
                 &selected_hosts,
             )
         }
@@ -6664,19 +6717,19 @@ fn ai_client_display_name(client: AiClientProfile) -> &'static str {
     }
 }
 
-fn auto_detect_add_hosts(root: &std::path::Path) -> Vec<AiClientProfile> {
+fn auto_detect_add_hosts(install_paths: &InstallPaths) -> Vec<AiClientProfile> {
     cli_surfaces::AI_HOST_SPECS
         .iter()
         .filter_map(|spec| match spec.client {
             AiClientProfile::GenericStdioMcp | AiClientProfile::GenericHttpMcp => None,
             client => {
-                let has_config = spec
-                    .native_config_target
-                    .map(|path| root.join(path).exists())
+                let has_config = install_paths
+                    .host_config_path(client)
+                    .map(|path| path.exists())
                     .unwrap_or(false);
-                let has_doc = spec
-                    .native_doc_target
-                    .map(|path| root.join(path).exists())
+                let has_doc = install_paths
+                    .host_doc_path(client)
+                    .map(|path| path.exists())
                     .unwrap_or(false);
                 let shared_doc_only = matches!(
                     client,
@@ -6876,12 +6929,13 @@ fn apply_runtime_registration(
         .iter()
         .map(|host| runtime_registration_artifact(*host, root, server_name, registration))
         .collect::<Result<Vec<_>>>()?;
+    let install_paths = InstallPaths::local(root.to_path_buf());
 
     if register_mode == ArtifactMode::Preview {
         let outcomes = cli_surfaces::preview_artifacts_with_apply_selection(
             &artifacts,
             ArtifactMode::Apply,
-            root,
+            &install_paths,
             register_hosts,
         )?;
         eprint_preview_outcomes(&outcomes);
@@ -6889,7 +6943,7 @@ fn apply_runtime_registration(
         let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
             &artifacts,
             register_mode,
-            root,
+            &install_paths,
             register_hosts,
         )?;
         eprint_write_outcomes(&outcomes);
@@ -7155,11 +7209,11 @@ fn render_discovery_portable_agent_doc(snapshot: &Value) -> String {
 
 fn generate_discovery_portable_agent_doc_artifact(
     snapshot: &Value,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> cli_surfaces::GeneratedArtifact {
     cli_surfaces::GeneratedArtifact {
         label: format!("Portable {} context", discovery_kind_title(snapshot)),
-        target_path: root.join("AGENTS.md"),
+        target_path: install_paths.portable_agent_doc_path(),
         content: render_discovery_portable_agent_doc(snapshot),
         apply_strategy: cli_surfaces::ApplyStrategy::ManagedMarkdownBlock,
         audience: cli_surfaces::ArtifactAudience::Portable,
@@ -7170,12 +7224,14 @@ fn generate_discovery_portable_agent_doc_artifact(
 fn generate_discovery_agent_doc_artifact(
     snapshot: &Value,
     client: AiClientProfile,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> cli_surfaces::GeneratedArtifact {
     let spec = cli_surfaces::host_profile_spec(client);
     cli_surfaces::GeneratedArtifact {
         label: format!("{} {} context", spec.label, discovery_kind_title(snapshot)),
-        target_path: root.join(spec.native_doc_target.unwrap_or("AGENTS.md")),
+        target_path: install_paths
+            .host_doc_path(client)
+            .unwrap_or_else(|| install_paths.portable_agent_doc_path()),
         content: render_discovery_agent_doc(snapshot, client),
         apply_strategy: cli_surfaces::ApplyStrategy::ManagedMarkdownBlock,
         audience: cli_surfaces::ArtifactAudience::Client(client),
@@ -7185,12 +7241,12 @@ fn generate_discovery_agent_doc_artifact(
 
 fn generate_discovery_host_native_agent_doc_artifacts(
     snapshot: &Value,
-    root: &Path,
+    install_paths: &InstallPaths,
 ) -> Vec<cli_surfaces::GeneratedArtifact> {
     cli_surfaces::AI_HOST_SPECS
         .iter()
         .filter(|spec| spec.native_doc_target.is_some())
-        .map(|spec| generate_discovery_agent_doc_artifact(snapshot, spec.client, root))
+        .map(|spec| generate_discovery_agent_doc_artifact(snapshot, spec.client, install_paths))
         .collect()
 }
 
@@ -7199,7 +7255,7 @@ fn resolve_discovery_init_artifacts(
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
     hosts: &[AiClientProfile],
-    root: &Path,
+    install_paths: &InstallPaths,
     mode: ArtifactMode,
 ) -> Result<(Vec<cli_surfaces::GeneratedArtifact>, Vec<AiClientProfile>)> {
     validate_full_apply_hosts(mode, coverage, hosts)?;
@@ -7209,7 +7265,9 @@ fn resolve_discovery_init_artifacts(
             Ok((
                 snapshots
                     .iter()
-                    .map(|snapshot| generate_discovery_agent_doc_artifact(snapshot, client, root))
+                    .map(|snapshot| {
+                        generate_discovery_agent_doc_artifact(snapshot, client, install_paths)
+                    })
                     .collect(),
                 vec![client],
             ))
@@ -7219,10 +7277,11 @@ fn resolve_discovery_init_artifacts(
                 .iter()
                 .flat_map(|snapshot| {
                     std::iter::once(generate_discovery_portable_agent_doc_artifact(
-                        snapshot, root,
+                        snapshot,
+                        install_paths,
                     ))
                     .chain(
-                        generate_discovery_host_native_agent_doc_artifacts(snapshot, root),
+                        generate_discovery_host_native_agent_doc_artifacts(snapshot, install_paths),
                     )
                 })
                 .collect(),
@@ -7236,7 +7295,7 @@ fn resolve_cli_ai_init_artifacts(
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
     hosts: &[AiClientProfile],
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     skills_path: &std::path::Path,
     mode: ArtifactMode,
 ) -> Result<(Vec<cli_surfaces::GeneratedArtifact>, Vec<AiClientProfile>)> {
@@ -7244,18 +7303,26 @@ fn resolve_cli_ai_init_artifacts(
     match coverage {
         AiCoverage::Single => {
             let client = require_cli_ai_client(coverage, client)?;
-            let profile_artifact = cli_surfaces::generate_profile_artifact(profile, root)?;
-            let agent_doc = cli_surfaces::generate_agent_doc_artifact(profile, client, root);
+            let profile_artifact = cli_surfaces::generate_profile_artifact(profile, install_paths)?;
+            let agent_doc =
+                cli_surfaces::generate_agent_doc_artifact(profile, client, install_paths);
             let mut artifacts = vec![profile_artifact, agent_doc];
-            if let Some(client_config) =
-                cli_surfaces::generate_client_config_artifact(profile, client, root, skills_path)
-            {
+            if let Some(client_config) = cli_surfaces::generate_client_config_artifact(
+                profile,
+                client,
+                install_paths,
+                skills_path,
+            ) {
                 artifacts.push(client_config);
             }
             Ok((artifacts, vec![client]))
         }
         AiCoverage::Full => Ok((
-            cli_surfaces::generate_full_coverage_init_artifacts(profile, root, skills_path)?,
+            cli_surfaces::generate_full_coverage_init_artifacts(
+                profile,
+                install_paths,
+                skills_path,
+            )?,
             hosts.to_vec(),
         )),
     }
@@ -7266,7 +7333,7 @@ fn resolve_cli_ai_agent_doc_artifacts(
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
     hosts: &[AiClientProfile],
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     mode: ArtifactMode,
 ) -> Result<(Vec<cli_surfaces::GeneratedArtifact>, Vec<AiClientProfile>)> {
     validate_full_apply_hosts(mode, coverage, hosts)?;
@@ -7275,17 +7342,21 @@ fn resolve_cli_ai_agent_doc_artifacts(
             let client = require_cli_ai_client(coverage, client)?;
             Ok((
                 vec![cli_surfaces::generate_agent_doc_artifact(
-                    profile, client, root,
+                    profile,
+                    client,
+                    install_paths,
                 )],
                 vec![client],
             ))
         }
         AiCoverage::Full => {
             let mut artifacts = vec![cli_surfaces::generate_portable_agent_doc_artifact(
-                profile, root,
+                profile,
+                install_paths,
             )];
             artifacts.extend(cli_surfaces::generate_host_native_agent_doc_artifacts(
-                profile, root,
+                profile,
+                install_paths,
             ));
             Ok((artifacts, hosts.to_vec()))
         }
@@ -7297,7 +7368,7 @@ fn resolve_cli_ai_client_config_artifacts(
     coverage: AiCoverage,
     client: Option<AiClientProfile>,
     hosts: &[AiClientProfile],
-    root: &std::path::Path,
+    install_paths: &InstallPaths,
     skills_path: &std::path::Path,
     mode: ArtifactMode,
 ) -> Result<(Vec<cli_surfaces::GeneratedArtifact>, Vec<AiClientProfile>)> {
@@ -7305,14 +7376,18 @@ fn resolve_cli_ai_client_config_artifacts(
     match coverage {
         AiCoverage::Single => {
             let client = require_cli_ai_client(coverage, client)?;
-            let artifact =
-                cli_surfaces::generate_client_config_artifact(profile, client, root, skills_path)
-                    .ok_or_else(|| {
-                    sxmc::error::SxmcError::Other(format!(
-                        "{} does not have a native MCP config target in sxmc",
-                        ai_client_display_name(client)
-                    ))
-                })?;
+            let artifact = cli_surfaces::generate_client_config_artifact(
+                profile,
+                client,
+                install_paths,
+                skills_path,
+            )
+            .ok_or_else(|| {
+                sxmc::error::SxmcError::Other(format!(
+                    "{} does not have a native MCP config target in sxmc",
+                    ai_client_display_name(client)
+                ))
+            })?;
             Ok((vec![artifact], vec![client]))
         }
         AiCoverage::Full => {
@@ -7334,7 +7409,7 @@ fn resolve_cli_ai_client_config_artifacts(
                 if let Some(artifact) = cli_surfaces::generate_client_config_artifact(
                     profile,
                     client,
-                    root,
+                    install_paths,
                     skills_path,
                 ) {
                     artifacts.push(artifact);
@@ -7366,16 +7441,17 @@ fn profile_command_executable(command: &str) -> String {
 }
 
 fn sync_state_value(
-    root: &Path,
+    install_paths: &InstallPaths,
     hosts: &[AiClientProfile],
     mode: &str,
     entries: &[Value],
 ) -> Value {
     json!({
         "sync_schema": SYNC_STATE_SCHEMA,
-        "root": root.display().to_string(),
-        "profile_dir": default_saved_profiles_dir(root).display().to_string(),
-        "state_path": default_sync_state_path(root).display().to_string(),
+        "root": install_paths.project_root().display().to_string(),
+        "install_scope": install_paths.scope().as_str(),
+        "profile_dir": default_saved_profiles_dir(install_paths).display().to_string(),
+        "state_path": default_sync_state_path(install_paths).display().to_string(),
         "last_synced_at": Utc::now().to_rfc3339(),
         "mode": mode,
         "profile_count": entries.len(),
@@ -7386,16 +7462,16 @@ fn sync_state_value(
 }
 
 fn sync_saved_profiles_value(
-    root: &Path,
+    install_paths: &InstallPaths,
     only_hosts: &[AiClientProfile],
     skills_path: &Path,
     apply: bool,
     allow_low_confidence: bool,
 ) -> Result<Value> {
-    let profile_dir = default_saved_profiles_dir(root);
-    let state_path = default_sync_state_path(root);
+    let profile_dir = default_saved_profiles_dir(install_paths);
+    let state_path = default_sync_state_path(install_paths);
     let selected_hosts = if only_hosts.is_empty() {
-        auto_detect_add_hosts(root)
+        auto_detect_add_hosts(install_paths)
     } else {
         only_hosts.to_vec()
     };
@@ -7466,7 +7542,7 @@ fn sync_saved_profiles_value(
                                         AiCoverage::Full,
                                         None,
                                         &selected_hosts,
-                                        root,
+                                        install_paths,
                                         skills_path,
                                         ArtifactMode::Apply,
                                     )?;
@@ -7478,14 +7554,14 @@ fn sync_saved_profiles_value(
                                     cli_surfaces::materialize_artifacts_with_apply_selection(
                                         &artifacts,
                                         ArtifactMode::Apply,
-                                        root,
+                                        install_paths,
                                         &selected_hosts,
                                     )?
                                 } else {
                                     cli_surfaces::preview_artifacts_with_apply_selection(
                                         &artifacts,
                                         ArtifactMode::Apply,
-                                        root,
+                                        install_paths,
                                         &selected_hosts,
                                     )?
                                 };
@@ -7573,8 +7649,12 @@ fn sync_saved_profiles_value(
         }
     }
 
-    let state_value =
-        sync_state_value(root, &selected_hosts, sync_mode_name(apply), &state_entries);
+    let state_value = sync_state_value(
+        install_paths,
+        &selected_hosts,
+        sync_mode_name(apply),
+        &state_entries,
+    );
     if apply {
         if let Some(parent) = state_path.parent() {
             fs::create_dir_all(parent)?;
@@ -7584,7 +7664,8 @@ fn sync_saved_profiles_value(
 
     Ok(json!({
         "command": "sync",
-        "root": root.display().to_string(),
+        "root": install_paths.project_root().display().to_string(),
+        "install_scope": install_paths.scope().as_str(),
         "mode": sync_mode_name(apply),
         "state_path": state_path.display().to_string(),
         "profile_dir": profile_dir.display().to_string(),
@@ -7601,7 +7682,7 @@ fn sync_saved_profiles_value(
         "entries": entries,
         "sync_state": state_value,
         "recommended_command": if !apply {
-            Value::from(format!("sxmc sync --root {} --apply", root.display()))
+            Value::from(format!("sxmc sync {} --apply", scope_command_hint(install_paths)))
         } else {
             Value::Null
         }
@@ -7611,6 +7692,10 @@ fn sync_saved_profiles_value(
 fn format_sync_report(value: &Value) -> String {
     let mut lines = vec![
         format!("Root: {}", value["root"].as_str().unwrap_or("<unknown>")),
+        format!(
+            "Install scope: {}",
+            value["install_scope"].as_str().unwrap_or("local")
+        ),
         format!("Mode: {}", value["mode"].as_str().unwrap_or("preview")),
         format!(
             "Saved profiles: {} total, {} changed, {} unchanged, {} blocked, {} errors",
@@ -10113,6 +10198,8 @@ async fn main() -> Result<()> {
             command,
             depth,
             root,
+            global,
+            local,
             skills_path,
             hosts,
             preview,
@@ -10121,14 +10208,14 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let profile = cli_surfaces::inspect_cli_with_depth(&command, allow_self, depth)?;
             ensure_profile_ready_for_agent_docs(&profile, allow_low_confidence)?;
             let render_format = explicit_structured_format(format, pretty);
             let auto_detected_hosts = hosts.is_empty();
 
             let selected_hosts = if auto_detected_hosts {
-                auto_detect_add_hosts(&root)
+                auto_detect_add_hosts(&install_paths)
             } else {
                 hosts
             };
@@ -10148,8 +10235,8 @@ async fn main() -> Result<()> {
                 );
             } else if render_format.is_none() {
                 println!(
-                    "No configured AI hosts detected under {}. Previewing the full onboarding plan instead.",
-                    root.display()
+                    "No configured AI hosts detected for the {} install scope. Previewing the full onboarding plan instead.",
+                    install_paths.scope().as_str()
                 );
                 println!(
                     "Tip: create a host-native file first or pass --host <name> to apply directly."
@@ -10161,7 +10248,7 @@ async fn main() -> Result<()> {
                 AiCoverage::Full,
                 None,
                 &selected_hosts,
-                &root,
+                &install_paths,
                 &skills_path,
                 if apply {
                     ArtifactMode::Apply
@@ -10174,23 +10261,23 @@ async fn main() -> Result<()> {
                 cli_surfaces::materialize_artifacts_with_apply_selection(
                     &artifacts,
                     ArtifactMode::Apply,
-                    &root,
+                    &install_paths,
                     &selected_hosts,
                 )?
             } else if has_selected_hosts {
                 cli_surfaces::preview_artifacts_with_apply_selection(
                     &artifacts,
                     ArtifactMode::Apply,
-                    &root,
+                    &install_paths,
                     &selected_hosts,
                 )?
             } else {
-                cli_surfaces::preview_artifacts(&artifacts, ArtifactMode::Apply, &root)?
+                cli_surfaces::preview_artifacts(&artifacts, ArtifactMode::Apply, &install_paths)?
             };
 
             if let Some(format) = render_format {
                 let value = add_result_value(AddResultContext {
-                    root: &root,
+                    install_paths: &install_paths,
                     command: &command,
                     profile: &profile,
                     hosts: &selected_hosts,
@@ -10212,6 +10299,8 @@ async fn main() -> Result<()> {
             limit,
             depth,
             root,
+            global,
+            local,
             skills_path,
             hosts,
             preview,
@@ -10220,7 +10309,7 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let auto_detected_tools = tools.is_empty();
             let tools = if auto_detected_tools {
                 detect_setup_tools(limit)
@@ -10236,7 +10325,7 @@ async fn main() -> Result<()> {
             let auto_detected_hosts = hosts.is_empty();
 
             let selected_hosts = if auto_detected_hosts {
-                auto_detect_add_hosts(&root)
+                auto_detect_add_hosts(&install_paths)
             } else {
                 hosts
             };
@@ -10259,8 +10348,8 @@ async fn main() -> Result<()> {
                 );
             } else if render_format.is_none() {
                 println!(
-                    "No configured AI hosts detected under {}. Previewing the full onboarding plan instead.",
-                    root.display()
+                    "No configured AI hosts detected for the {} install scope. Previewing the full onboarding plan instead.",
+                    install_paths.scope().as_str()
                 );
                 println!(
                     "Tip: create a host-native file first or pass --host <name> to apply directly."
@@ -10279,7 +10368,7 @@ async fn main() -> Result<()> {
                     AiCoverage::Full,
                     None,
                     &selected_hosts,
-                    &root,
+                    &install_paths,
                     &skills_path,
                     if apply {
                         ArtifactMode::Apply
@@ -10292,18 +10381,22 @@ async fn main() -> Result<()> {
                     cli_surfaces::materialize_artifacts_with_apply_selection(
                         &artifacts,
                         ArtifactMode::Apply,
-                        &root,
+                        &install_paths,
                         &selected_hosts,
                     )?
                 } else if has_selected_hosts {
                     cli_surfaces::preview_artifacts_with_apply_selection(
                         &artifacts,
                         ArtifactMode::Apply,
-                        &root,
+                        &install_paths,
                         &selected_hosts,
                     )?
                 } else {
-                    cli_surfaces::preview_artifacts(&artifacts, ArtifactMode::Apply, &root)?
+                    cli_surfaces::preview_artifacts(
+                        &artifacts,
+                        ArtifactMode::Apply,
+                        &install_paths,
+                    )?
                 };
 
                 if render_format.is_none() && apply {
@@ -10322,7 +10415,7 @@ async fn main() -> Result<()> {
 
             if let Some(format) = render_format {
                 let value = setup_result_value(SetupResultContext {
-                    root: &root,
+                    install_paths: &install_paths,
                     tools: &tools,
                     tool_results: &tool_results,
                     auto_detected_tools,
@@ -10344,12 +10437,14 @@ async fn main() -> Result<()> {
                 hosts,
                 skills_path,
                 root,
+                global,
+                local,
                 mode,
                 remove,
                 allow_low_confidence,
                 allow_self,
             } => {
-                let root = resolve_generation_root(root)?;
+                let install_paths = resolve_install_paths(root, global, local)?;
                 let profile = cli_surfaces::inspect_cli_with_depth(&from_cli, allow_self, depth)?;
                 if !remove {
                     ensure_profile_ready_for_agent_docs(&profile, allow_low_confidence)?;
@@ -10359,7 +10454,7 @@ async fn main() -> Result<()> {
                     coverage,
                     client,
                     &hosts,
-                    &root,
+                    &install_paths,
                     &skills_path,
                     mode,
                 )?;
@@ -10367,7 +10462,7 @@ async fn main() -> Result<()> {
                     let outcomes = cli_surfaces::remove_artifacts_with_apply_selection(
                         &artifacts,
                         mode,
-                        &root,
+                        &install_paths,
                         &selected_hosts,
                     )?;
                     print_remove_outcomes(&outcomes);
@@ -10375,7 +10470,7 @@ async fn main() -> Result<()> {
                     let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
                         &artifacts,
                         mode,
-                        &root,
+                        &install_paths,
                         &selected_hosts,
                     )?;
                     print_write_outcomes(&outcomes);
@@ -10387,16 +10482,27 @@ async fn main() -> Result<()> {
                 client,
                 hosts,
                 root,
+                global,
+                local,
                 mode,
             } => {
-                let root = resolve_generation_root(root)?;
+                let install_paths = resolve_install_paths(root, global, local)?;
                 let snapshots = load_discovery_snapshots(&snapshot)?;
                 let (artifacts, selected_hosts) = resolve_discovery_init_artifacts(
-                    &snapshots, coverage, client, &hosts, &root, mode,
+                    &snapshots,
+                    coverage,
+                    client,
+                    &hosts,
+                    &install_paths,
+                    mode,
                 )?;
                 if mode == ArtifactMode::Preview {
                     let outcomes = if coverage == AiCoverage::Full && selected_hosts.is_empty() {
-                        cli_surfaces::preview_artifacts(&artifacts, ArtifactMode::Apply, &root)?
+                        cli_surfaces::preview_artifacts(
+                            &artifacts,
+                            ArtifactMode::Apply,
+                            &install_paths,
+                        )?
                     } else {
                         cli_surfaces::preview_artifacts_with_apply_selection(
                             &artifacts,
@@ -10405,7 +10511,7 @@ async fn main() -> Result<()> {
                             } else {
                                 ArtifactMode::Preview
                             },
-                            &root,
+                            &install_paths,
                             &selected_hosts,
                         )?
                     };
@@ -10414,7 +10520,7 @@ async fn main() -> Result<()> {
                     let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
                         &artifacts,
                         mode,
-                        &root,
+                        &install_paths,
                         &selected_hosts,
                     )?;
                     print_write_outcomes(&outcomes);
@@ -10430,10 +10536,12 @@ async fn main() -> Result<()> {
                 mode,
             } => {
                 let root = resolve_generation_root(root)?;
+                let install_paths = InstallPaths::local(root.clone());
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 let artifact =
                     cli_surfaces::generate_ci_workflow_artifact(&profile, &root, &output_dir);
-                let outcomes = cli_surfaces::materialize_artifacts(&[artifact], mode, &root)?;
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&[artifact], mode, &install_paths)?;
                 print_write_outcomes(&outcomes);
             }
             ScaffoldAction::Skill {
@@ -10443,10 +10551,12 @@ async fn main() -> Result<()> {
                 mode,
             } => {
                 let root = resolve_generation_root(root)?;
+                let install_paths = InstallPaths::local(root.clone());
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 let artifacts =
                     cli_surfaces::generate_skill_artifacts(&profile, &root, &output_dir);
-                let outcomes = cli_surfaces::materialize_artifacts(&artifacts, mode, &root)?;
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&artifacts, mode, &install_paths)?;
                 print_write_outcomes(&outcomes);
             }
             ScaffoldAction::AgentDoc {
@@ -10455,19 +10565,26 @@ async fn main() -> Result<()> {
                 client,
                 hosts,
                 root,
+                global,
+                local,
                 mode,
                 allow_low_confidence,
             } => {
-                let root = resolve_generation_root(root)?;
+                let install_paths = resolve_install_paths(root, global, local)?;
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 ensure_profile_ready_for_agent_docs(&profile, allow_low_confidence)?;
                 let (artifacts, selected_hosts) = resolve_cli_ai_agent_doc_artifacts(
-                    &profile, coverage, client, &hosts, &root, mode,
+                    &profile,
+                    coverage,
+                    client,
+                    &hosts,
+                    &install_paths,
+                    mode,
                 )?;
                 let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
                     &artifacts,
                     mode,
-                    &root,
+                    &install_paths,
                     &selected_hosts,
                 )?;
                 print_write_outcomes(&outcomes);
@@ -10479,23 +10596,25 @@ async fn main() -> Result<()> {
                 hosts,
                 skills_path,
                 root,
+                global,
+                local,
                 mode,
             } => {
-                let root = resolve_generation_root(root)?;
+                let install_paths = resolve_install_paths(root, global, local)?;
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 let (artifacts, selected_hosts) = resolve_cli_ai_client_config_artifacts(
                     &profile,
                     coverage,
                     client,
                     &hosts,
-                    &root,
+                    &install_paths,
                     &skills_path,
                     mode,
                 )?;
                 let outcomes = cli_surfaces::materialize_artifacts_with_apply_selection(
                     &artifacts,
                     mode,
-                    &root,
+                    &install_paths,
                     &selected_hosts,
                 )?;
                 print_write_outcomes(&outcomes);
@@ -10507,10 +10626,12 @@ async fn main() -> Result<()> {
                 mode,
             } => {
                 let root = resolve_generation_root(root)?;
+                let install_paths = InstallPaths::local(root.clone());
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 let artifacts =
                     cli_surfaces::generate_mcp_wrapper_artifacts(&profile, &root, &output_dir)?;
-                let outcomes = cli_surfaces::materialize_artifacts(&artifacts, mode, &root)?;
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&artifacts, mode, &install_paths)?;
                 print_write_outcomes(&outcomes);
             }
             ScaffoldAction::LlmTxt {
@@ -10519,9 +10640,11 @@ async fn main() -> Result<()> {
                 mode,
             } => {
                 let root = resolve_generation_root(root)?;
+                let install_paths = InstallPaths::local(root.clone());
                 let profile = cli_surfaces::load_profile(&from_profile)?;
                 let artifact = cli_surfaces::generate_llms_txt_artifact(&profile, &root);
-                let outcomes = cli_surfaces::materialize_artifacts(&[artifact], mode, &root)?;
+                let outcomes =
+                    cli_surfaces::materialize_artifacts(&[artifact], mode, &install_paths)?;
                 match mode {
                     ArtifactMode::Preview | ArtifactMode::Patch => {
                         print_preview_outcomes(&outcomes)
@@ -10705,6 +10828,8 @@ async fn main() -> Result<()> {
         }
         Commands::Doctor {
             root,
+            global,
+            local,
             check,
             only_hosts,
             fix,
@@ -10718,12 +10843,13 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let mut report_hosts = only_hosts.clone();
             let explicit_structured = format.is_some() || pretty;
             if fix || remove {
-                let selected_hosts = infer_doctor_hosts(&root, &only_hosts)?;
-                let from_cli = infer_doctor_from_cli(&root, &selected_hosts, from_cli.as_deref())?;
+                let selected_hosts = infer_doctor_hosts(&install_paths, &only_hosts)?;
+                let from_cli =
+                    infer_doctor_from_cli(&install_paths, &selected_hosts, from_cli.as_deref())?;
                 if report_hosts.is_empty() {
                     report_hosts = selected_hosts.clone();
                 }
@@ -10737,7 +10863,7 @@ async fn main() -> Result<()> {
                     println!("Using CLI surface: {}", from_cli);
                 }
                 let outcomes = repair_doctor_startup_files(DoctorRepairOptions {
-                    root: &root,
+                    install_paths: &install_paths,
                     only_hosts: &selected_hosts,
                     from_cli: &from_cli,
                     depth,
@@ -10748,7 +10874,7 @@ async fn main() -> Result<()> {
                 })?;
                 print_write_outcomes(&outcomes);
             }
-            let value = doctor_value(&root, &report_hosts)?;
+            let value = doctor_value(&install_paths, &report_hosts)?;
             if should_render_doctor_human(human, format, pretty, std::io::stdout().is_terminal()) {
                 print_doctor_report(&value);
             } else if let Some(format) = output::prefer_structured_output(format, pretty) {
@@ -10773,6 +10899,8 @@ async fn main() -> Result<()> {
         }
         Commands::Status {
             root,
+            global,
+            local,
             only_hosts,
             compare_hosts,
             health,
@@ -10781,9 +10909,10 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let value =
-                status_value_with_health(&root, &only_hosts, &compare_hosts, health).await?;
+                status_value_with_health(&install_paths, &only_hosts, &compare_hosts, health)
+                    .await?;
             if should_render_doctor_human(human, format, pretty, std::io::stdout().is_terminal()) {
                 print_status_report(&value);
             } else if let Some(format) = output::prefer_structured_output(format, pretty) {
@@ -10798,6 +10927,8 @@ async fn main() -> Result<()> {
         }
         Commands::Sync {
             root,
+            global,
+            local,
             only_hosts,
             skills_path,
             apply,
@@ -10806,9 +10937,9 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let value = sync_saved_profiles_value(
-                &root,
+                &install_paths,
                 &only_hosts,
                 &skills_path,
                 apply,
@@ -10829,6 +10960,8 @@ async fn main() -> Result<()> {
         }
         Commands::Watch {
             root,
+            global,
+            local,
             only_hosts,
             compare_hosts,
             health,
@@ -10844,7 +10977,7 @@ async fn main() -> Result<()> {
             pretty,
             format,
         } => {
-            let root = resolve_generation_root(root)?;
+            let install_paths = resolve_install_paths(root, global, local)?;
             let stdout_is_tty = std::io::stdout().is_terminal();
             let interval = Duration::from_secs(interval_seconds.max(1));
             let notify_headers = parse_headers(&notify_headers)?;
@@ -10852,7 +10985,8 @@ async fn main() -> Result<()> {
             let mut first_frame = true;
             loop {
                 let value =
-                    status_value_with_health(&root, &only_hosts, &compare_hosts, health).await?;
+                    status_value_with_health(&install_paths, &only_hosts, &compare_hosts, health)
+                        .await?;
                 let rendered = render_status_output(&value, format, pretty, stdout_is_tty);
                 if last_rendered.as_ref() != Some(&rendered) {
                     println!("{rendered}");
@@ -10862,7 +10996,7 @@ async fn main() -> Result<()> {
                     let should_notify = !first_frame || unhealthy;
                     if should_notify {
                         let reason = if unhealthy { "unhealthy" } else { "change" };
-                        let event = watch_event_value(&root, reason, &value);
+                        let event = watch_event_value(&install_paths, reason, &value);
                         let payload = watch_notification_payload(notify_template, &event);
                         if let Some(path) = notify_file.as_ref() {
                             append_watch_notification(path, &payload)?;

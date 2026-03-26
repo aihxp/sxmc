@@ -82,6 +82,9 @@ These are the core product paths we should treat as stable:
   - `generic-stdio-mcp`
   - `generic-http-mcp`
 - preview, sidecar, patch, and apply modes are supported
+- project-local installs are the default, and `--global` / `--local` are
+  supported across the startup lifecycle to choose between repo-local and
+  user-level host artifact targets
 - apply mode updates managed markdown blocks or mergeable config files only
 - full-coverage apply updates only the explicitly selected `--host` targets and sidecars the rest
 - `sxmc add`, `sxmc setup`, `sxmc doctor`, `sxmc status`, and `sxmc sync` all support explicit
@@ -106,6 +109,8 @@ Contract rules for these outputs:
 - new fields should be added additively rather than replacing old ones
 - stable exit-code behavior should not drift silently
 - recovery guidance should become more specific over time, not disappear
+- `install_scope` may be added or returned additively on startup-lifecycle
+  structured outputs, but existing top-level fields should remain stable
 
 ## Should Fail Gracefully
 

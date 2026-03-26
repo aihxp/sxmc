@@ -763,8 +763,16 @@ pub enum Commands {
         depth: usize,
 
         /// Project root to write profiles and AI-host artifacts into
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Write AI host artifacts into user-level host locations instead of the project
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep AI host artifacts project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Skills path used when generating MCP client config artifacts
         #[arg(long, default_value = ".claude/skills")]
@@ -815,8 +823,16 @@ pub enum Commands {
         depth: usize,
 
         /// Project root to write profiles and AI-host artifacts into
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Write AI host artifacts into user-level host locations instead of the project
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep AI host artifacts project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Skills path used when generating MCP client config artifacts
         #[arg(long, default_value = ".claude/skills")]
@@ -879,8 +895,16 @@ pub enum Commands {
     /// Show startup-discovery status and recommended first sxmc commands
     Doctor {
         /// Project root to inspect for startup-facing AI files
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Inspect and repair user-level AI host locations instead of project-local files
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep doctor checks project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Exit non-zero if startup-facing AI files are missing
         #[arg(long)]
@@ -939,8 +963,16 @@ pub enum Commands {
     /// Unified status for startup files, cache, baked MCP servers, and saved CLI profiles
     Status {
         /// Project root to inspect for startup-facing AI files and saved profiles
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Inspect user-level AI host locations instead of project-local files
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep status checks project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Limit startup-file checks to specific AI hosts
         #[arg(
@@ -979,8 +1011,16 @@ pub enum Commands {
     /// Reconcile saved CLI profiles and AI-host artifacts against installed tools
     Sync {
         /// Project root to inspect for saved profiles and AI-host artifacts
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Reconcile user-level AI host artifacts and state instead of project-local files
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep sync project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Limit AI artifact refreshes to specific AI hosts
         #[arg(
@@ -1019,8 +1059,16 @@ pub enum Commands {
     /// Watch saved-profile drift and environment health over time
     Watch {
         /// Project root to inspect for startup-facing AI files and saved profiles
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+
+        /// Watch user-level AI host locations instead of project-local files
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+
+        /// Explicitly keep watch project-local
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Limit startup-file checks to specific AI hosts
         #[arg(
@@ -1962,8 +2010,12 @@ pub enum InitAction {
         hosts: Vec<AiClientProfile>,
         #[arg(long, default_value = ".claude/skills")]
         skills_path: PathBuf,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,
         #[arg(long)]
@@ -1990,8 +2042,12 @@ pub enum InitAction {
         hosts: Vec<AiClientProfile>,
 
         /// Project root to write docs/config into
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
 
         /// Preview, patch, sidecar, or apply the generated artifacts
         #[arg(long, value_enum, default_value = "preview")]
@@ -2030,8 +2086,12 @@ pub enum ScaffoldAction {
         coverage: AiCoverage,
         #[arg(long = "host", value_enum, value_delimiter = ',')]
         hosts: Vec<AiClientProfile>,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,
         #[arg(long)]
@@ -2048,8 +2108,12 @@ pub enum ScaffoldAction {
         hosts: Vec<AiClientProfile>,
         #[arg(long, default_value = ".claude/skills")]
         skills_path: PathBuf,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "global")]
         root: Option<PathBuf>,
+        #[arg(long, conflicts_with = "local", conflicts_with = "root")]
+        global: bool,
+        #[arg(long, conflicts_with = "global")]
+        local: bool,
         #[arg(long, value_enum, default_value = "preview")]
         mode: ArtifactMode,
     },

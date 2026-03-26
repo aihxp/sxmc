@@ -1401,6 +1401,25 @@ if has_cmd git; then
     fail "add structured output" "${add_json_out:0:140}"
   fi
 
+  GLOBAL_HOME="$TMPDIR_TEST/global-home"
+  mkdir -p "$GLOBAL_HOME/.claude" "$GLOBAL_HOME/.config"
+  printf "# Existing Claude guidance\n" > "$GLOBAL_HOME/.claude/CLAUDE.md"
+  add_global_out=$(HOME="$GLOBAL_HOME" USERPROFILE="$GLOBAL_HOME" XDG_CONFIG_HOME="$GLOBAL_HOME/.config" APPDATA="$GLOBAL_HOME/AppData/Roaming" LOCALAPPDATA="$GLOBAL_HOME/AppData/Local" "$SXMC" add git --global 2>&1 || true)
+  if echo "$add_global_out" | grep -q "Detected configured AI hosts: Claude Code" && \
+     [ -f "$GLOBAL_HOME/.config/sxmc/ai/profiles/git.json" ] && \
+     [ -f "$GLOBAL_HOME/.config/sxmc/ai/claude-code-mcp.json" ]; then
+    pass "add --global writes user-level host artifacts"
+  else
+    fail "add --global" "${add_global_out:0:140}"
+  fi
+
+  status_global_out=$(HOME="$GLOBAL_HOME" USERPROFILE="$GLOBAL_HOME" XDG_CONFIG_HOME="$GLOBAL_HOME/.config" APPDATA="$GLOBAL_HOME/AppData/Roaming" LOCALAPPDATA="$GLOBAL_HOME/AppData/Local" "$SXMC" status --global --format json-pretty 2>&1 || true)
+  if json_check "$status_global_out" "d.get('install_scope') == 'global' and '.claude/CLAUDE.md' in d.get('startup_files', {}).get('claude_code', {}).get('path', '')"; then
+    pass "status --global reports user-level targets"
+  else
+    fail "status --global" "${status_global_out:0:140}"
+  fi
+
   DISCOVERY_SNAPSHOT="$TMPDIR_TEST/codebase-discovery.json"
   "$SXMC" discover codebase "$ROOT" --output "$DISCOVERY_SNAPSHOT" >/dev/null 2>&1 || true
   if [ -f "$DISCOVERY_SNAPSHOT" ] && [ -s "$DISCOVERY_SNAPSHOT" ]; then
@@ -1452,6 +1471,14 @@ if has_cmd git; then
     pass "setup supports structured output and client alias"
   else
     fail "setup structured output" "${setup_json_out:0:140}"
+  fi
+
+  setup_global_out=$(HOME="$GLOBAL_HOME" USERPROFILE="$GLOBAL_HOME" XDG_CONFIG_HOME="$GLOBAL_HOME/.config" APPDATA="$GLOBAL_HOME/AppData/Roaming" LOCALAPPDATA="$GLOBAL_HOME/AppData/Local" "$SXMC" setup --tool git,ls --global 2>&1 || true)
+  if [ -f "$GLOBAL_HOME/.config/sxmc/ai/profiles/git.json" ] && \
+     [ -f "$GLOBAL_HOME/.config/sxmc/ai/profiles/ls.json" ]; then
+    pass "setup --global writes multiple profiles into global state"
+  else
+    fail "setup --global" "${setup_global_out:0:140}"
   fi
 
   REGISTER_ROOT="$TMPDIR_TEST/register-root"

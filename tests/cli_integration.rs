@@ -3798,6 +3798,68 @@ fn test_add_supports_structured_output_and_client_alias() {
 }
 
 #[test]
+fn test_add_global_writes_user_level_host_artifacts_and_global_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("CLAUDE.md"), "# Existing Claude guidance\n").unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .current_dir(temp.path())
+        .args(["add", "git", "--global"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Detected configured AI hosts: Claude Code",
+        ));
+
+    assert!(temp
+        .path()
+        .join(".config")
+        .join("sxmc")
+        .join("ai")
+        .join("profiles")
+        .join("git.json")
+        .exists());
+    assert!(temp
+        .path()
+        .join(".config")
+        .join("sxmc")
+        .join("ai")
+        .join("claude-code-mcp.json")
+        .exists());
+    assert!(!temp.path().join("CLAUDE.md").exists());
+
+    let claude = fs::read_to_string(claude_dir.join("CLAUDE.md")).unwrap();
+    assert!(claude.contains("sxmc:begin cli-ai:claude-code"));
+    assert!(claude.contains("git"));
+}
+
+#[test]
+fn test_status_global_reports_user_level_targets() {
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("CLAUDE.md"), "# Existing Claude guidance\n").unwrap();
+
+    let value = sxmc_with_config_home(temp.path())
+        .current_dir(temp.path())
+        .args(["status", "--global", "--format", "json-pretty"])
+        .output()
+        .map(|output| {
+            assert!(output.status.success());
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        })
+        .unwrap();
+
+    assert_eq!(value["install_scope"], Value::from("global"));
+    assert!(value["startup_files"]["claude_code"]["path"]
+        .as_str()
+        .unwrap_or("")
+        .contains(".claude/CLAUDE.md"));
+}
+
+#[test]
 fn test_setup_applies_multiple_tools_to_detected_hosts() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
@@ -3826,6 +3888,33 @@ fn test_setup_applies_multiple_tools_to_detected_hosts() {
     assert!(temp.path().join(".sxmc/ai/profiles/git.json").exists());
     assert!(temp.path().join(".sxmc/ai/profiles/ls.json").exists());
     assert!(temp.path().join(".sxmc/ai/claude-code-mcp.json").exists());
+}
+
+#[test]
+fn test_setup_global_writes_multiple_profiles_into_global_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let claude_dir = temp.path().join(".claude");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::write(claude_dir.join("CLAUDE.md"), "# Existing Claude guidance\n").unwrap();
+
+    sxmc_with_config_home(temp.path())
+        .current_dir(temp.path())
+        .args(["setup", "--tool", "git,ls", "--global"])
+        .assert()
+        .success();
+
+    let config_root = temp.path().join(".config").join("sxmc");
+    assert!(config_root
+        .join("ai")
+        .join("profiles")
+        .join("git.json")
+        .exists());
+    assert!(config_root
+        .join("ai")
+        .join("profiles")
+        .join("ls.json")
+        .exists());
+    assert!(config_root.join("ai").join("claude-code-mcp.json").exists());
 }
 
 #[test]
