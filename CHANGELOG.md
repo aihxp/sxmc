@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-03-26
+
 ### Added
 
 - `sxmc setup`, `sxmc add`, `sxmc init ai`, `sxmc doctor`, `sxmc status`,
