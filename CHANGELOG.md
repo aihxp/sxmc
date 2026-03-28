@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-03-28
+
+### Fixed
+
+- Build with **rmcp 1.3**: `StreamableHttpServerConfig` is `#[non_exhaustive]`, so
+  streamable-HTTP servers now use `StreamableHttpServerConfig::default()
+  .with_cancellation_token(...)` instead of struct literals.
+- Declare **rmcp** dependency as **1.3** so the lockfile matches the non-exhaustive API.
+
 ## [1.0.9] - 2026-03-26
 
 ### Changed
